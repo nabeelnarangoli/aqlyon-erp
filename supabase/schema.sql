@@ -1,0 +1,1139 @@
+-- =====================================================================
+--  AQLYON BRAND MANAGEMENT — Agency ERP
+--  Supabase / PostgreSQL schema
+--  Run once in Supabase → SQL Editor (safe to re-run: uses IF NOT EXISTS
+--  and CREATE OR REPLACE where possible).
+-- =====================================================================
+
+create extension if not exists pgcrypto;
+
+-- ---------------------------------------------------------------------
+-- 1. ROLES & PROFILES
+-- ---------------------------------------------------------------------
+do $$ begin
+  create type app_role as enum ('admin','marketer','designer','finance');
+exception when duplicate_object then null; end $$;
+
+create table if not exists public.profiles (
+  id            uuid primary key references auth.users(id) on delete cascade,
+  full_name     text not null default '',
+  email         text,
+  phone         text,
+  role          app_role not null default 'designer',
+  designation   text,
+  avatar_url    text,
+  cost_per_hour numeric(10,2) not null default 0,   -- internal cost, for profitability
+  weekly_hours  numeric(5,1)  not null default 48,  -- capacity, for utilisation
+  active        boolean not null default true,
+  created_at    timestamptz not null default now()
+);
+
+-- current user's role (security definer so RLS policies can call it)
+create or replace function public.my_role() returns app_role
+language sql stable security definer set search_path = public as $$
+  select role from public.profiles where id = auth.uid() and active
+$$;
+
+create or replace function public.is_admin() returns boolean
+language sql stable security definer set search_path = public as $$
+  select coalesce(public.my_role() = 'admin', false)
+$$;
+
+create or replace function public.has_role(roles app_role[]) returns boolean
+language sql stable security definer set search_path = public as $$
+  select coalesce(public.my_role() = any(roles), false)
+$$;
+
+-- auto-create a profile when an auth user is created
+create or replace function public.handle_new_user() returns trigger
+language plpgsql security definer set search_path = public as $$
+declare
+  first_user boolean;
+begin
+  select not exists(select 1 from public.profiles) into first_user;
+  -- The very first account becomes the admin. Every other account starts DISABLED
+  -- with no special role; the admin-users server function (Team & Access page)
+  -- then sets the real role and activates it. Sign-up metadata is never trusted.
+  insert into public.profiles (id, email, full_name, role, active)
+  values (
+    new.id,
+    new.email,
+    coalesce(new.raw_user_meta_data->>'full_name', split_part(new.email,'@',1)),
+    case when first_user then 'admin'::app_role else 'designer'::app_role end,
+    first_user
+  )
+  on conflict (id) do nothing;
+  return new;
+end $$;
+
+drop trigger if exists on_auth_user_created on auth.users;
+create trigger on_auth_user_created after insert on auth.users
+  for each row execute function public.handle_new_user();
+
+-- ---------------------------------------------------------------------
+-- 2. SETTINGS & MASTER DATA
+-- ---------------------------------------------------------------------
+create table if not exists public.settings (
+  id             int primary key default 1 check (id = 1),
+  company_name   text not null default 'Aqlyon Brand Management',
+  address        text default 'First Floor, Muhyiddin Building, behind Municipal Shopping Complex, Koyilandy, Keralam 673305, India',
+  phone          text default '+91 70341 42256',
+  email          text,
+  website        text default 'www.aqlyondm.com',
+  currency       text not null default 'INR',
+  invoice_prefix text not null default 'AQB-INV',
+  quote_prefix   text not null default 'AQB-QT',
+  task_prefix    text not null default 'DT',
+  bank_details   text,
+  upi_id         text,
+  invoice_terms  text default 'Payment due within 7 days of invoice date. Thank you for your business!',
+  default_max_revisions int not null default 3,
+  updated_at     timestamptz default now()
+);
+insert into public.settings (id) values (1) on conflict do nothing;
+
+create table if not exists public.services (
+  id          uuid primary key default gen_random_uuid(),
+  name        text not null,
+  category    text not null default 'Social Media',  -- Social Media, Design, Ads, SEO, Web, Video, Branding, Other
+  unit        text not null default 'per item',       -- per item, per month, per project, per hour
+  rate        numeric(12,2) not null default 0,
+  description text,
+  active      boolean not null default true,
+  created_at  timestamptz not null default now()
+);
+
+-- ---------------------------------------------------------------------
+-- 3. CRM — LEADS, CLIENTS, PACKAGES, INTERACTIONS
+-- ---------------------------------------------------------------------
+create table if not exists public.leads (
+  id               uuid primary key default gen_random_uuid(),
+  name             text not null,
+  company          text,
+  phone            text,
+  whatsapp         text,
+  email            text,
+  city             text,
+  industry         text,
+  source           text default 'Walk-in',     -- Instagram, Facebook, Referral, Website, Walk-in, Google, WhatsApp, Cold call, Event
+  services_interest text[] default '{}',
+  estimated_value  numeric(12,2) default 0,
+  stage            text not null default 'new'
+                   check (stage in ('new','contacted','meeting','proposal','negotiation','won','lost')),
+  temperature      text default 'warm' check (temperature in ('hot','warm','cold')),
+  owner_id         uuid references public.profiles(id) on delete set null,
+  next_follow_up   date,
+  lost_reason      text,
+  notes            text,
+  converted_client_id uuid,
+  created_by       uuid references public.profiles(id) on delete set null default auth.uid(),
+  created_at       timestamptz not null default now(),
+  updated_at       timestamptz not null default now()
+);
+
+create table if not exists public.clients (
+  id                 uuid primary key default gen_random_uuid(),
+  code               text unique,
+  name               text not null,             -- brand / business name
+  contact_person     text,
+  phone              text,
+  whatsapp           text,
+  email              text,
+  address            text,
+  city               text,
+  industry           text,
+  website            text,
+  instagram          text,
+  facebook           text,
+  linkedin           text,
+  youtube            text,
+  other_links        text,
+  account_manager_id uuid references public.profiles(id) on delete set null,
+  status             text not null default 'active' check (status in ('onboarding','active','paused','churned')),
+  brand_colors       text,
+  brand_fonts        text,
+  brand_tone         text,
+  brand_assets_link  text,      -- Google Drive / Dropbox link to logos, guidelines
+  target_audience    text,
+  notes              text,
+  lead_id            uuid references public.leads(id) on delete set null,
+  onboarded_on       date default current_date,
+  created_by         uuid references public.profiles(id) on delete set null default auth.uid(),
+  created_at         timestamptz not null default now(),
+  updated_at         timestamptz not null default now()
+);
+
+alter table public.leads drop constraint if exists leads_converted_client_fk;
+alter table public.leads add constraint leads_converted_client_fk
+  foreign key (converted_client_id) references public.clients(id) on delete set null;
+
+-- Retainer / package agreements (monthly deliverables + fee)
+create table if not exists public.packages (
+  id              uuid primary key default gen_random_uuid(),
+  client_id       uuid not null references public.clients(id) on delete cascade,
+  name            text not null,                     -- e.g. "Social Media Growth – Monthly"
+  billing_type    text not null default 'monthly' check (billing_type in ('monthly','quarterly','yearly','one_time')),
+  fee             numeric(12,2) not null default 0,
+  start_date      date not null default current_date,
+  end_date        date,
+  renewal_date    date,
+  billing_day     int default 1 check (billing_day between 1 and 28),
+  posts_per_month   int default 0,
+  reels_per_month   int default 0,
+  stories_per_month int default 0,
+  carousels_per_month int default 0,
+  ad_budget       numeric(12,2) default 0,           -- client's ad spend (pass-through)
+  platforms       text[] default '{}',
+  scope_notes     text,
+  status          text not null default 'active' check (status in ('active','paused','ended')),
+  created_by      uuid references public.profiles(id) on delete set null default auth.uid(),
+  created_at      timestamptz not null default now()
+);
+
+-- Interaction log (calls, meetings, WhatsApp, visits) for leads OR clients
+create table if not exists public.interactions (
+  id            uuid primary key default gen_random_uuid(),
+  client_id     uuid references public.clients(id) on delete cascade,
+  lead_id       uuid references public.leads(id) on delete cascade,
+  type          text not null default 'call' check (type in ('call','meeting','whatsapp','email','visit','video_call','note')),
+  direction     text default 'outgoing' check (direction in ('incoming','outgoing')),
+  summary       text not null,
+  outcome       text,
+  next_action   text,
+  next_action_date date,
+  done          boolean not null default false,       -- next action completed
+  occurred_at   timestamptz not null default now(),
+  created_by    uuid references public.profiles(id) on delete set null default auth.uid(),
+  created_at    timestamptz not null default now(),
+  check (client_id is not null or lead_id is not null)
+);
+
+-- Campaigns / projects (ad campaigns, launches, one-off projects)
+create table if not exists public.projects (
+  id           uuid primary key default gen_random_uuid(),
+  client_id    uuid not null references public.clients(id) on delete cascade,
+  name         text not null,
+  type         text not null default 'Campaign',  -- Campaign, Branding, Website, Video Shoot, Event, Ads, SEO, Other
+  platform     text,                               -- Meta, Google, YouTube, LinkedIn...
+  objective    text,
+  start_date   date,
+  end_date     date,
+  budget       numeric(12,2) default 0,           -- agency fee for project
+  ad_spend     numeric(12,2) default 0,
+  status       text not null default 'planning' check (status in ('planning','active','on_hold','completed','cancelled')),
+  -- results (ads / campaign KPIs)
+  reach        bigint default 0,
+  impressions  bigint default 0,
+  clicks       bigint default 0,
+  leads_generated int default 0,
+  conversions  int default 0,
+  results_notes text,
+  owner_id     uuid references public.profiles(id) on delete set null default auth.uid(),
+  created_at   timestamptz not null default now()
+);
+
+-- ---------------------------------------------------------------------
+-- 4. DESIGN TASKS, PROOFS, COMMENTS, TIME LOGS
+-- ---------------------------------------------------------------------
+create sequence if not exists public.task_seq start 1001;
+
+create table if not exists public.design_tasks (
+  id             uuid primary key default gen_random_uuid(),
+  code           text unique,
+  client_id      uuid references public.clients(id) on delete set null,
+  project_id     uuid references public.projects(id) on delete set null,
+  title          text not null,
+  task_type      text not null default 'Social Post',  -- Social Post, Story, Reel, Carousel, Logo, Brochure, Flyer, Banner, Poster, Video, Motion Graphic, Ad Creative, Packaging, Thumbnail, Other
+  platform       text,                                  -- Instagram, Facebook, YouTube, LinkedIn, Print, Website...
+  size           text,                                  -- 1080x1080, 1080x1920, A4...
+  quantity       int not null default 1,
+  brief          text,
+  copy_text      text,                                  -- text that must appear on the design
+  reference_links text,
+  priority       text not null default 'normal' check (priority in ('low','normal','high','urgent')),
+  status         text not null default 'todo'
+                 check (status in ('todo','in_progress','internal_review','client_review','revision','approved','delivered','cancelled')),
+  assignee_id    uuid references public.profiles(id) on delete set null,
+  created_by     uuid references public.profiles(id) on delete set null default auth.uid(),
+  due_date       date,
+  start_date     date,
+  estimated_hours numeric(6,2) default 0,
+  revision_count int not null default 0,
+  max_revisions  int not null default 3,
+  billable       boolean not null default true,
+  final_file_link text,                                 -- Drive link to source/final files
+  approved_at    timestamptz,
+  delivered_at   timestamptz,
+  created_at     timestamptz not null default now(),
+  updated_at     timestamptz not null default now()
+);
+
+create table if not exists public.task_proofs (
+  id            uuid primary key default gen_random_uuid(),
+  task_id       uuid not null references public.design_tasks(id) on delete cascade,
+  version       int not null default 1,
+  file_path     text,          -- path in storage bucket "proofs"
+  file_name     text,
+  file_type     text,
+  external_link text,          -- alternative: Drive / Canva link
+  note          text,
+  status        text not null default 'pending' check (status in ('pending','approved','changes_requested')),
+  review_note   text,
+  reviewed_by   uuid references public.profiles(id) on delete set null,
+  reviewed_at   timestamptz,
+  client_decision text check (client_decision in ('approved','changes_requested')),
+  client_note   text,
+  client_decided_at timestamptz,
+  uploaded_by   uuid references public.profiles(id) on delete set null default auth.uid(),
+  created_at    timestamptz not null default now()
+);
+
+create table if not exists public.task_comments (
+  id          uuid primary key default gen_random_uuid(),
+  task_id     uuid not null references public.design_tasks(id) on delete cascade,
+  author_id   uuid references public.profiles(id) on delete set null default auth.uid(),
+  body        text not null,
+  kind        text not null default 'comment' check (kind in ('comment','system','client')),
+  created_at  timestamptz not null default now()
+);
+
+create table if not exists public.time_logs (
+  id          uuid primary key default gen_random_uuid(),
+  user_id     uuid not null references public.profiles(id) on delete cascade default auth.uid(),
+  task_id     uuid references public.design_tasks(id) on delete set null,
+  client_id   uuid references public.clients(id) on delete set null,
+  log_date    date not null default current_date,
+  minutes     int not null check (minutes > 0),
+  billable    boolean not null default true,
+  note        text,
+  created_at  timestamptz not null default now()
+);
+
+-- ---------------------------------------------------------------------
+-- 5. TEAM QUERIES (cross-team questions / tickets)
+-- ---------------------------------------------------------------------
+create table if not exists public.queries (
+  id           uuid primary key default gen_random_uuid(),
+  subject      text not null,
+  body         text,
+  category     text default 'General',   -- General, Design, Client, Content, Finance, Access/Files
+  priority     text not null default 'normal' check (priority in ('low','normal','high','urgent')),
+  status       text not null default 'open' check (status in ('open','answered','resolved')),
+  from_user    uuid references public.profiles(id) on delete set null default auth.uid(),
+  to_user      uuid references public.profiles(id) on delete set null,
+  to_role      app_role,
+  client_id    uuid references public.clients(id) on delete set null,
+  task_id      uuid references public.design_tasks(id) on delete set null,
+  resolved_at  timestamptz,
+  created_at   timestamptz not null default now(),
+  updated_at   timestamptz not null default now()
+);
+
+create table if not exists public.query_replies (
+  id         uuid primary key default gen_random_uuid(),
+  query_id   uuid not null references public.queries(id) on delete cascade,
+  author_id  uuid references public.profiles(id) on delete set null default auth.uid(),
+  body       text not null,
+  created_at timestamptz not null default now()
+);
+
+-- ---------------------------------------------------------------------
+-- 6. CONTENT CALENDAR
+-- ---------------------------------------------------------------------
+create table if not exists public.content_posts (
+  id             uuid primary key default gen_random_uuid(),
+  client_id      uuid not null references public.clients(id) on delete cascade,
+  publish_date   date not null,
+  publish_time   time,
+  platforms      text[] not null default '{Instagram}',
+  post_type      text not null default 'Post',  -- Post, Reel, Story, Carousel, Video, Blog, Ad
+  pillar         text,                           -- content pillar: Educational, Promotional, Engagement, Festival, Testimonial...
+  title          text not null,
+  caption        text,
+  hashtags       text,
+  cta            text,
+  design_task_id uuid references public.design_tasks(id) on delete set null,
+  media_link     text,
+  status         text not null default 'idea'
+                 check (status in ('idea','copywriting','in_design','internal_review','client_approval','approved','scheduled','published','cancelled')),
+  client_note    text,
+  client_decided_at timestamptz,
+  published_url  text,
+  -- post performance
+  reach          int default 0,
+  likes          int default 0,
+  comments       int default 0,
+  shares         int default 0,
+  saves          int default 0,
+  created_by     uuid references public.profiles(id) on delete set null default auth.uid(),
+  created_at     timestamptz not null default now(),
+  updated_at     timestamptz not null default now()
+);
+
+-- Tokenised links clients use to approve content / proofs without logging in
+create table if not exists public.approval_links (
+  token       text primary key default encode(gen_random_bytes(18),'hex'),
+  client_id   uuid not null references public.clients(id) on delete cascade,
+  label       text,
+  expires_at  timestamptz not null default now() + interval '30 days',
+  revoked     boolean not null default false,
+  created_by  uuid references public.profiles(id) on delete set null default auth.uid(),
+  created_at  timestamptz not null default now()
+);
+
+-- ---------------------------------------------------------------------
+-- 7. FINANCE — QUOTATIONS, INVOICES, PAYMENTS, EXPENSES
+-- ---------------------------------------------------------------------
+create sequence if not exists public.invoice_seq start 1;
+create sequence if not exists public.quote_seq   start 1;
+
+create table if not exists public.quotations (
+  id           uuid primary key default gen_random_uuid(),
+  number       text unique,
+  client_id    uuid references public.clients(id) on delete set null,
+  lead_id      uuid references public.leads(id) on delete set null,
+  bill_to      text,                       -- name/address shown when no client yet
+  issue_date   date not null default current_date,
+  valid_until  date default current_date + 15,
+  items        jsonb not null default '[]',  -- [{description, qty, rate}]
+  discount     numeric(12,2) not null default 0,
+  subtotal     numeric(12,2) not null default 0,
+  total        numeric(12,2) not null default 0,
+  status       text not null default 'draft' check (status in ('draft','sent','accepted','rejected','expired')),
+  notes        text,
+  terms        text,
+  created_by   uuid references public.profiles(id) on delete set null default auth.uid(),
+  created_at   timestamptz not null default now()
+);
+
+create table if not exists public.invoices (
+  id           uuid primary key default gen_random_uuid(),
+  number       text unique,
+  client_id    uuid not null references public.clients(id) on delete restrict,
+  package_id   uuid references public.packages(id) on delete set null,
+  project_id   uuid references public.projects(id) on delete set null,
+  quotation_id uuid references public.quotations(id) on delete set null,
+  period_month date,                         -- for retainer invoices: first day of month billed
+  issue_date   date not null default current_date,
+  due_date     date not null default current_date + 7,
+  items        jsonb not null default '[]',
+  discount     numeric(12,2) not null default 0,
+  subtotal     numeric(12,2) not null default 0,
+  total        numeric(12,2) not null default 0,
+  amount_paid  numeric(12,2) not null default 0,
+  status       text not null default 'draft' check (status in ('draft','sent','partial','paid','cancelled')),
+  notes        text,
+  terms        text,
+  created_by   uuid references public.profiles(id) on delete set null default auth.uid(),
+  created_at   timestamptz not null default now(),
+  unique (package_id, period_month)
+);
+
+create table if not exists public.payments (
+  id           uuid primary key default gen_random_uuid(),
+  invoice_id   uuid references public.invoices(id) on delete cascade,
+  client_id    uuid references public.clients(id) on delete set null,
+  paid_on      date not null default current_date,
+  amount       numeric(12,2) not null check (amount > 0),
+  method       text not null default 'UPI' check (method in ('Cash','UPI','Bank Transfer','Cheque','Card','Other')),
+  reference    text,
+  note         text,
+  created_by   uuid references public.profiles(id) on delete set null default auth.uid(),
+  created_at   timestamptz not null default now()
+);
+
+create table if not exists public.expenses (
+  id           uuid primary key default gen_random_uuid(),
+  spent_on     date not null default current_date,
+  category     text not null default 'Office',  -- Salary, Rent, Utilities, Internet, Software/Subscriptions, Ad Spend (Client), Stock/Assets, Printing, Equipment, Travel, Marketing, Freelancer, Office, Tax/Fees, Other
+  vendor       text,
+  description  text,
+  amount       numeric(12,2) not null check (amount > 0),
+  method       text not null default 'UPI' check (method in ('Cash','UPI','Bank Transfer','Cheque','Card','Other')),
+  client_id    uuid references public.clients(id) on delete set null,   -- if spent for a client
+  rebillable   boolean not null default false,
+  receipt_path text,
+  recurring    boolean not null default false,
+  created_by   uuid references public.profiles(id) on delete set null default auth.uid(),
+  created_at   timestamptz not null default now()
+);
+
+-- ---------------------------------------------------------------------
+-- 8. NOTIFICATIONS & ACTIVITY
+-- ---------------------------------------------------------------------
+create table if not exists public.notifications (
+  id         uuid primary key default gen_random_uuid(),
+  user_id    uuid not null references public.profiles(id) on delete cascade,
+  title      text not null,
+  body       text,
+  link       text,
+  read       boolean not null default false,
+  created_at timestamptz not null default now()
+);
+
+create table if not exists public.activity_log (
+  id         bigserial primary key,
+  actor_id   uuid references public.profiles(id) on delete set null default auth.uid(),
+  entity     text not null,
+  entity_id  uuid,
+  action     text not null,
+  details    text,
+  created_at timestamptz not null default now()
+);
+
+-- ---------------------------------------------------------------------
+-- 9. INDEXES
+-- ---------------------------------------------------------------------
+create index if not exists idx_leads_stage       on public.leads(stage);
+create index if not exists idx_leads_owner       on public.leads(owner_id);
+create index if not exists idx_leads_followup    on public.leads(next_follow_up);
+create index if not exists idx_clients_status    on public.clients(status);
+create index if not exists idx_inter_client      on public.interactions(client_id);
+create index if not exists idx_inter_lead        on public.interactions(lead_id);
+create index if not exists idx_inter_next        on public.interactions(next_action_date) where not done;
+create index if not exists idx_tasks_status      on public.design_tasks(status);
+create index if not exists idx_tasks_assignee    on public.design_tasks(assignee_id);
+create index if not exists idx_tasks_client      on public.design_tasks(client_id);
+create index if not exists idx_tasks_due         on public.design_tasks(due_date);
+create index if not exists idx_proofs_task       on public.task_proofs(task_id);
+create index if not exists idx_comments_task     on public.task_comments(task_id);
+create index if not exists idx_time_user_date    on public.time_logs(user_id, log_date);
+create index if not exists idx_posts_client_date on public.content_posts(client_id, publish_date);
+create index if not exists idx_inv_client        on public.invoices(client_id);
+create index if not exists idx_inv_status        on public.invoices(status);
+create index if not exists idx_pay_invoice       on public.payments(invoice_id);
+create index if not exists idx_exp_date          on public.expenses(spent_on);
+create index if not exists idx_notif_user        on public.notifications(user_id, read);
+create index if not exists idx_queries_to        on public.queries(to_user, status);
+
+-- ---------------------------------------------------------------------
+-- 10. TRIGGERS — numbering, totals, timestamps, notifications
+-- ---------------------------------------------------------------------
+create or replace function public.touch_updated_at() returns trigger language plpgsql as $$
+begin new.updated_at := now(); return new; end $$;
+
+do $$ declare t text; begin
+  foreach t in array array['leads','clients','design_tasks','queries','content_posts'] loop
+    execute format('drop trigger if exists trg_touch on public.%I', t);
+    execute format('create trigger trg_touch before update on public.%I for each row execute function public.touch_updated_at()', t);
+  end loop;
+end $$;
+
+-- line-item totals for quotations/invoices: items = [{description, qty, rate}]
+create or replace function public.compute_doc_totals() returns trigger language plpgsql as $$
+declare s numeric := 0;
+begin
+  select coalesce(sum( coalesce((i->>'qty')::numeric,1) * coalesce((i->>'rate')::numeric,0) ),0)
+    into s from jsonb_array_elements(coalesce(new.items,'[]'::jsonb)) i;
+  new.subtotal := round(s,2);
+  new.total    := greatest(round(s - coalesce(new.discount,0),2), 0);
+  return new;
+end $$;
+
+drop trigger if exists trg_quote_totals on public.quotations;
+create trigger trg_quote_totals before insert or update of items, discount on public.quotations
+  for each row execute function public.compute_doc_totals();
+drop trigger if exists trg_invoice_totals on public.invoices;
+create trigger trg_invoice_totals before insert or update of items, discount on public.invoices
+  for each row execute function public.compute_doc_totals();
+
+-- document numbers: AQB-INV-2026-0001
+create or replace function public.assign_numbers() returns trigger
+language plpgsql security definer set search_path = public as $$
+declare st public.settings;
+begin
+  select * into st from public.settings where id = 1;
+  if tg_table_name = 'invoices' then
+    if new.number is null then
+      new.number := st.invoice_prefix || '-' || to_char(new.issue_date,'YYYY') || '-' || lpad(nextval('public.invoice_seq')::text, 4, '0');
+    end if;
+  elsif tg_table_name = 'quotations' then
+    if new.number is null then
+      new.number := st.quote_prefix || '-' || to_char(new.issue_date,'YYYY') || '-' || lpad(nextval('public.quote_seq')::text, 4, '0');
+    end if;
+  elsif tg_table_name = 'design_tasks' then
+    if new.code is null then
+      new.code := st.task_prefix || '-' || nextval('public.task_seq')::text;
+    end if;
+  elsif tg_table_name = 'clients' then
+    if new.code is null then
+      new.code := 'CL-' || lpad((select coalesce(max(nullif(regexp_replace(code,'\D','','g'),'')::int),0)+1 from public.clients)::text, 3, '0');
+    end if;
+  end if;
+  return new;
+end $$;
+
+drop trigger if exists trg_inv_number on public.invoices;
+create trigger trg_inv_number before insert on public.invoices for each row execute function public.assign_numbers();
+drop trigger if exists trg_quote_number on public.quotations;
+create trigger trg_quote_number before insert on public.quotations for each row execute function public.assign_numbers();
+drop trigger if exists trg_task_code on public.design_tasks;
+create trigger trg_task_code before insert on public.design_tasks for each row execute function public.assign_numbers();
+drop trigger if exists trg_client_code on public.clients;
+create trigger trg_client_code before insert on public.clients for each row execute function public.assign_numbers();
+
+-- keep invoice.amount_paid & status in sync with payments
+create or replace function public.sync_invoice_paid() returns trigger
+language plpgsql security definer set search_path = public as $$
+declare inv uuid := coalesce(new.invoice_id, old.invoice_id); paid numeric; tot numeric; cur text;
+begin
+  if inv is null then return null; end if;
+  select coalesce(sum(amount),0) into paid from public.payments where invoice_id = inv;
+  select total, status into tot, cur from public.invoices where id = inv;
+  update public.invoices set amount_paid = paid,
+    status = case
+      when cur = 'cancelled' then cur
+      when paid >= tot and tot > 0 then 'paid'
+      when paid > 0 then 'partial'
+      when cur in ('paid','partial') then 'sent'
+      else cur end
+  where id = inv;
+  return null;
+end $$;
+
+drop trigger if exists trg_pay_sync on public.payments;
+create trigger trg_pay_sync after insert or update or delete on public.payments
+  for each row execute function public.sync_invoice_paid();
+
+-- payment inherits client from invoice
+create or replace function public.payment_fill_client() returns trigger language plpgsql as $$
+begin
+  if new.client_id is null and new.invoice_id is not null then
+    select client_id into new.client_id from public.invoices where id = new.invoice_id;
+  end if;
+  return new;
+end $$;
+drop trigger if exists trg_pay_client on public.payments;
+create trigger trg_pay_client before insert on public.payments for each row execute function public.payment_fill_client();
+
+-- helper to notify a user
+create or replace function public.notify(uid uuid, t text, b text, l text) returns void
+language sql security definer set search_path = public as $$
+  insert into public.notifications(user_id, title, body, link)
+  select uid, t, b, l where uid is not null and uid is distinct from auth.uid();
+$$;
+
+-- design task workflow side-effects
+create or replace function public.task_events() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  if tg_op = 'INSERT' then
+    if new.max_revisions is null or new.max_revisions = 3 then
+      new.max_revisions := coalesce((select default_max_revisions from public.settings where id=1), 3);
+    end if;
+    return new;
+  end if;
+
+  if new.assignee_id is distinct from old.assignee_id and new.assignee_id is not null then
+    perform public.notify(new.assignee_id, 'New design task assigned', new.code || ' · ' || new.title, '/tasks/' || new.id);
+  end if;
+
+  if new.status is distinct from old.status then
+    if new.status = 'revision' then
+      new.revision_count := old.revision_count + 1;
+      perform public.notify(new.assignee_id, 'Revision requested', new.code || ' · ' || new.title, '/tasks/' || new.id);
+    elsif new.status = 'internal_review' then
+      perform public.notify(new.created_by, 'Design ready for review (proof uploaded)', new.code || ' · ' || new.title, '/tasks/' || new.id);
+    elsif new.status = 'approved' then
+      new.approved_at := coalesce(new.approved_at, now());
+      perform public.notify(new.assignee_id, 'Design approved 🎉', new.code || ' · ' || new.title, '/tasks/' || new.id);
+    elsif new.status = 'delivered' then
+      new.delivered_at := coalesce(new.delivered_at, now());
+    elsif new.status = 'in_progress' and new.start_date is null then
+      new.start_date := current_date;
+    end if;
+    insert into public.task_comments(task_id, author_id, body, kind)
+      values (new.id, auth.uid(), 'Status changed: ' || replace(old.status,'_',' ') || ' → ' || replace(new.status,'_',' '), 'system');
+  end if;
+  return new;
+end $$;
+
+drop trigger if exists trg_task_events on public.design_tasks;
+create trigger trg_task_events before insert or update on public.design_tasks
+  for each row execute function public.task_events();
+
+-- designers may only move their own tasks through production statuses
+create or replace function public.task_designer_guard() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  if public.my_role() = 'designer' and current_setting('erp.internal', true) is distinct from 'on' then
+    if new.status is distinct from old.status
+       and new.status not in ('todo','in_progress','internal_review') then
+      raise exception 'Designers can only set status to To do, In progress or Ready for review';
+    end if;
+    if new.title is distinct from old.title or new.client_id is distinct from old.client_id
+       or new.due_date is distinct from old.due_date or new.priority is distinct from old.priority
+       or new.brief is distinct from old.brief or new.max_revisions is distinct from old.max_revisions then
+      raise exception 'Designers cannot edit the brief, client, due date or priority — raise a query instead';
+    end if;
+  end if;
+  return new;
+end $$;
+drop trigger if exists trg_task_guard on public.design_tasks;
+create trigger trg_task_guard before update on public.design_tasks
+  for each row execute function public.task_designer_guard();
+
+create or replace function public.proof_designer_guard() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  if public.my_role() = 'designer' and (
+       new.status is distinct from old.status or new.review_note is distinct from old.review_note
+    or new.client_decision is distinct from old.client_decision) then
+    raise exception 'Only marketers or admins can review proofs';
+  end if;
+  return new;
+end $$;
+drop trigger if exists trg_proof_guard on public.task_proofs;
+create trigger trg_proof_guard before update on public.task_proofs
+  for each row execute function public.proof_designer_guard();
+
+-- new assignment on insert → notify
+create or replace function public.task_after_insert() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  perform public.notify(new.assignee_id, 'New design task assigned', new.code || ' · ' || new.title, '/tasks/' || new.id);
+  return null;
+end $$;
+drop trigger if exists trg_task_after_insert on public.design_tasks;
+create trigger trg_task_after_insert after insert on public.design_tasks
+  for each row execute function public.task_after_insert();
+
+-- proof versioning + notify reviewer
+create or replace function public.proof_events() returns trigger
+language plpgsql security definer set search_path = public as $$
+declare t public.design_tasks;
+begin
+  select * into t from public.design_tasks where id = new.task_id;
+  if tg_op = 'INSERT' then
+    new.version := coalesce((select max(version) from public.task_proofs where task_id = new.task_id), 0) + 1;
+  end if;
+  return new;
+end $$;
+drop trigger if exists trg_proof_version on public.task_proofs;
+create trigger trg_proof_version before insert on public.task_proofs
+  for each row execute function public.proof_events();
+
+create or replace function public.proof_after() returns trigger
+language plpgsql security definer set search_path = public as $$
+declare t public.design_tasks;
+begin
+  select * into t from public.design_tasks where id = new.task_id;
+  if tg_op = 'INSERT' then
+    update public.design_tasks set status = 'internal_review'
+      where id = t.id and status in ('todo','in_progress','revision');
+  elsif new.status is distinct from old.status then
+    if new.status = 'approved' then
+      update public.design_tasks set status = 'client_review' where id = t.id and status = 'internal_review';
+    elsif new.status = 'changes_requested' then
+      update public.design_tasks set status = 'revision' where id = t.id and status not in ('delivered','cancelled');
+    end if;
+  end if;
+  if tg_op = 'UPDATE' and new.client_decision is distinct from old.client_decision then
+    if new.client_decision = 'approved' then
+      update public.design_tasks set status = 'approved' where id = t.id and status not in ('delivered','cancelled');
+    elsif new.client_decision = 'changes_requested' then
+      update public.design_tasks set status = 'revision' where id = t.id and status not in ('delivered','cancelled');
+    end if;
+    perform public.notify(t.created_by, 'Client ' || replace(new.client_decision,'_',' '), t.code || ' · ' || t.title, '/tasks/' || t.id);
+  end if;
+  return null;
+end $$;
+drop trigger if exists trg_proof_after on public.task_proofs;
+create trigger trg_proof_after after insert or update on public.task_proofs
+  for each row execute function public.proof_after();
+
+-- queries: notify recipient(s); replies notify the other side
+create or replace function public.query_events() returns trigger
+language plpgsql security definer set search_path = public as $$
+declare r record;
+begin
+  if new.to_user is not null then
+    perform public.notify(new.to_user, 'New query: ' || new.subject, left(coalesce(new.body,''),140), '/queries/' || new.id);
+  elsif new.to_role is not null then
+    for r in select id from public.profiles where role = new.to_role and active loop
+      perform public.notify(r.id, 'New query: ' || new.subject, left(coalesce(new.body,''),140), '/queries/' || new.id);
+    end loop;
+  end if;
+  return null;
+end $$;
+drop trigger if exists trg_query_events on public.queries;
+create trigger trg_query_events after insert on public.queries
+  for each row execute function public.query_events();
+
+create or replace function public.reply_events() returns trigger
+language plpgsql security definer set search_path = public as $$
+declare q public.queries;
+begin
+  select * into q from public.queries where id = new.query_id;
+  if new.author_id = q.from_user then
+    perform public.notify(q.to_user, 'Reply: ' || q.subject, left(new.body,140), '/queries/' || q.id);
+  else
+    perform public.notify(q.from_user, 'Reply: ' || q.subject, left(new.body,140), '/queries/' || q.id);
+    update public.queries set status = 'answered' where id = q.id and status = 'open';
+  end if;
+  return null;
+end $$;
+drop trigger if exists trg_reply_events on public.query_replies;
+create trigger trg_reply_events after insert on public.query_replies
+  for each row execute function public.reply_events();
+
+-- task comments notify the other party
+create or replace function public.comment_events() returns trigger
+language plpgsql security definer set search_path = public as $$
+declare t public.design_tasks;
+begin
+  if new.kind <> 'comment' then return null; end if;
+  select * into t from public.design_tasks where id = new.task_id;
+  perform public.notify(t.assignee_id, 'Comment on ' || t.code, left(new.body,140), '/tasks/' || t.id);
+  if t.created_by is distinct from t.assignee_id then
+    perform public.notify(t.created_by, 'Comment on ' || t.code, left(new.body,140), '/tasks/' || t.id);
+  end if;
+  return null;
+end $$;
+drop trigger if exists trg_comment_events on public.task_comments;
+create trigger trg_comment_events after insert on public.task_comments
+  for each row execute function public.comment_events();
+
+-- lead converted to client
+create or replace function public.convert_lead(p_lead uuid) returns uuid
+language plpgsql security definer set search_path = public as $$
+declare l public.leads; cid uuid;
+begin
+  if not public.has_role(array['admin','marketer']::app_role[]) then raise exception 'Not allowed'; end if;
+  select * into l from public.leads where id = p_lead;
+  if l.id is null then raise exception 'Lead not found'; end if;
+  if l.converted_client_id is not null then return l.converted_client_id; end if;
+  insert into public.clients(name, contact_person, phone, whatsapp, email, city, industry, account_manager_id, status, lead_id, notes)
+  values (coalesce(nullif(l.company,''), l.name), l.name, l.phone, l.whatsapp, l.email, l.city, l.industry,
+          coalesce(l.owner_id, auth.uid()), 'onboarding', l.id, l.notes)
+  returning id into cid;
+  update public.leads set stage = 'won', converted_client_id = cid where id = p_lead;
+  update public.interactions set client_id = cid where lead_id = p_lead and client_id is null;
+  return cid;
+end $$;
+
+-- generate retainer invoices for a month (idempotent: one per package per month)
+create or replace function public.generate_retainer_invoices(p_month date) returns int
+language plpgsql security definer set search_path = public as $$
+declare pk record; m date := date_trunc('month', p_month)::date; n int := 0; st public.settings;
+begin
+  if not public.has_role(array['admin','finance']::app_role[]) then raise exception 'Not allowed'; end if;
+  select * into st from public.settings where id = 1;
+  for pk in
+    select p.* from public.packages p
+    where p.status = 'active' and p.billing_type <> 'one_time'
+      and p.start_date <= (m + interval '1 month - 1 day')::date
+      and (p.end_date is null or p.end_date >= m)
+      and (p.billing_type = 'monthly'
+        or (p.billing_type = 'quarterly' and ((extract(year from age(m, date_trunc('month',p.start_date)))*12 + extract(month from age(m, date_trunc('month',p.start_date))))::int % 3) = 0)
+        or (p.billing_type = 'yearly'    and extract(month from m) = extract(month from p.start_date)))
+      and not exists (select 1 from public.invoices i where i.package_id = p.id and i.period_month = m)
+  loop
+    insert into public.invoices(client_id, package_id, period_month, issue_date, due_date, items, status, terms)
+    values (pk.client_id, pk.id, m,
+            greatest(current_date, (m + (coalesce(pk.billing_day,1)-1))::date),
+            greatest(current_date, (m + (coalesce(pk.billing_day,1)-1))::date) + 7,
+            jsonb_build_array(jsonb_build_object(
+              'description', pk.name || ' — ' || to_char(m,'Mon YYYY'),
+              'qty', 1, 'rate', pk.fee)),
+            'draft', st.invoice_terms);
+    n := n + 1;
+  end loop;
+  return n;
+end $$;
+
+-- ---------------------------------------------------------------------
+-- 11. CLIENT APPROVAL PORTAL (public, token based, no login)
+-- ---------------------------------------------------------------------
+create or replace function public.portal_get(p_token text) returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare lnk public.approval_links; c public.clients; res jsonb;
+begin
+  select * into lnk from public.approval_links where token = p_token and not revoked and expires_at > now();
+  if lnk.token is null then return jsonb_build_object('error','This link is invalid or has expired.'); end if;
+  select * into c from public.clients where id = lnk.client_id;
+  select jsonb_build_object(
+    'client', jsonb_build_object('name', c.name, 'contact', c.contact_person),
+    'company', (select jsonb_build_object('name', company_name, 'phone', phone, 'website', website) from public.settings where id=1),
+    'posts', coalesce((select jsonb_agg(to_jsonb(p) - 'created_by' order by p.publish_date)
+              from (select id, publish_date, publish_time, platforms, post_type, title, caption, hashtags, cta, media_link, status, client_note, design_task_id
+                    from public.content_posts
+                    where client_id = c.id and status in ('client_approval','approved','scheduled','published')
+                      and publish_date >= current_date - 7) p), '[]'),
+    'proofs', coalesce((select jsonb_agg(x order by x->>'created_at' desc) from (
+              select jsonb_build_object('id', pr.id, 'task_code', t.code, 'task_title', t.title, 'task_type', t.task_type,
+                     'version', pr.version, 'file_path', pr.file_path, 'file_type', pr.file_type, 'external_link', pr.external_link,
+                     'note', pr.note, 'client_decision', pr.client_decision, 'client_note', pr.client_note, 'created_at', pr.created_at) x
+              from public.task_proofs pr join public.design_tasks t on t.id = pr.task_id
+              where t.client_id = c.id and pr.status = 'approved'
+                and (pr.client_decision is null or pr.client_decided_at > now() - interval '14 days')
+                and pr.version = (select max(version) from public.task_proofs where task_id = t.id)) s), '[]')
+  ) into res;
+  return res;
+end $$;
+
+create or replace function public.portal_decide(p_token text, p_kind text, p_id uuid, p_decision text, p_note text)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare lnk public.approval_links; ok boolean := false; t public.design_tasks; p public.content_posts;
+begin
+  select * into lnk from public.approval_links where token = p_token and not revoked and expires_at > now();
+  if lnk.token is null then return jsonb_build_object('error','Link invalid or expired'); end if;
+  if p_decision not in ('approved','changes_requested') then return jsonb_build_object('error','Bad decision'); end if;
+
+  if p_kind = 'post' then
+    update public.content_posts set
+      status = case when p_decision = 'approved' then 'approved' else 'copywriting' end,
+      client_note = nullif(p_note,''), client_decided_at = now()
+    where id = p_id and client_id = lnk.client_id and status = 'client_approval'
+    returning * into p;
+    ok := p.id is not null;
+    if ok then
+      perform public.notify(p.created_by, 'Client ' || replace(p_decision,'_',' ') || ' a post', p.title || coalesce(' — ' || p_note,''), '/calendar');
+    end if;
+  elsif p_kind = 'proof' then
+    update public.task_proofs pr set client_decision = p_decision, client_note = nullif(p_note,''), client_decided_at = now()
+    from public.design_tasks dt
+    where pr.id = p_id and dt.id = pr.task_id and dt.client_id = lnk.client_id and pr.client_decision is null;
+    get diagnostics ok = row_count;
+    if ok and nullif(p_note,'') is not null then
+      insert into public.task_comments(task_id, author_id, body, kind)
+      select task_id, null, 'Client feedback: ' || p_note, 'client' from public.task_proofs where id = p_id;
+    end if;
+  end if;
+  return jsonb_build_object('ok', ok);
+end $$;
+
+grant execute on function public.portal_get(text) to anon, authenticated;
+grant execute on function public.portal_decide(text, text, uuid, text, text) to anon, authenticated;
+
+-- ---------------------------------------------------------------------
+-- 12. REPORTING VIEWS (security_invoker → respect RLS of caller)
+-- ---------------------------------------------------------------------
+create or replace view public.v_invoice_status with (security_invoker = true) as
+select i.*, c.name as client_name,
+       (i.total - i.amount_paid) as balance,
+       case when i.status in ('sent','partial') and i.due_date < current_date then true else false end as overdue,
+       greatest(current_date - i.due_date, 0) as days_overdue
+from public.invoices i join public.clients c on c.id = i.client_id;
+
+create or replace view public.v_monthly_finance with (security_invoker = true) as
+with m as (
+  select date_trunc('month', issue_date)::date as month, sum(total) as invoiced
+  from public.invoices where status <> 'cancelled' group by 1),
+p as (select date_trunc('month', paid_on)::date as month, sum(amount) as collected from public.payments group by 1),
+e as (select date_trunc('month', spent_on)::date as month, sum(amount) as expenses from public.expenses group by 1),
+months as (select month from m union select month from p union select month from e)
+select months.month,
+       coalesce(m.invoiced,0) as invoiced,
+       coalesce(p.collected,0) as collected,
+       coalesce(e.expenses,0) as expenses,
+       coalesce(p.collected,0) - coalesce(e.expenses,0) as net_cash
+from months left join m using(month) left join p using(month) left join e using(month)
+order by month;
+
+-- ---------------------------------------------------------------------
+-- 13. ROW LEVEL SECURITY
+--   admin    : everything
+--   marketer : CRM, packages, projects, tasks, calendar, quotations, queries
+--   designer : read clients/projects/calendar; work on design tasks; proofs; queries
+--   finance  : finance tables; read clients/packages/projects
+-- ---------------------------------------------------------------------
+do $$ declare t text; begin
+  foreach t in array array['profiles','settings','services','leads','clients','packages','interactions','projects',
+    'design_tasks','task_proofs','task_comments','time_logs','queries','query_replies','content_posts','approval_links',
+    'quotations','invoices','payments','expenses','notifications','activity_log'] loop
+    execute format('alter table public.%I enable row level security', t);
+  end loop;
+end $$;
+
+-- drop existing policies so this script can be re-run
+do $$ declare r record; begin
+  for r in select policyname, tablename from pg_policies where schemaname = 'public' loop
+    execute format('drop policy if exists %I on public.%I', r.policyname, r.tablename);
+  end loop;
+end $$;
+
+-- profiles
+create policy p_profiles_read  on public.profiles for select to authenticated using (true);
+create policy p_profiles_self  on public.profiles for update to authenticated
+  using (id = auth.uid()) with check (id = auth.uid() and role = public.my_role() and active);
+create policy p_profiles_admin on public.profiles for all to authenticated using (public.is_admin()) with check (public.is_admin());
+
+-- settings / services
+create policy p_settings_read  on public.settings for select to authenticated using (true);
+create policy p_settings_admin on public.settings for update to authenticated using (public.is_admin());
+create policy p_services_read  on public.services for select to authenticated using (true);
+create policy p_services_write on public.services for all to authenticated
+  using (public.has_role('{admin,marketer,finance}')) with check (public.has_role('{admin,marketer,finance}'));
+
+-- leads & interactions: admin + marketer
+create policy p_leads on public.leads for all to authenticated
+  using (public.has_role('{admin,marketer}')) with check (public.has_role('{admin,marketer}'));
+create policy p_inter_rw on public.interactions for all to authenticated
+  using (public.has_role('{admin,marketer}')) with check (public.has_role('{admin,marketer}'));
+create policy p_inter_finance_read on public.interactions for select to authenticated
+  using (public.has_role('{finance}') and client_id is not null);
+
+-- clients: everyone reads; admin+marketer write
+create policy p_clients_read  on public.clients for select to authenticated using (public.my_role() is not null);
+create policy p_clients_write on public.clients for insert to authenticated with check (public.has_role('{admin,marketer}'));
+create policy p_clients_upd   on public.clients for update to authenticated using (public.has_role('{admin,marketer}'));
+create policy p_clients_del   on public.clients for delete to authenticated using (public.is_admin());
+
+-- packages: read by admin/marketer/finance; write admin/marketer
+create policy p_pk_read  on public.packages for select to authenticated using (public.has_role('{admin,marketer,finance}'));
+create policy p_pk_write on public.packages for all to authenticated
+  using (public.has_role('{admin,marketer}')) with check (public.has_role('{admin,marketer}'));
+
+-- projects: everyone reads; admin+marketer write
+create policy p_proj_read  on public.projects for select to authenticated using (public.my_role() is not null);
+create policy p_proj_write on public.projects for all to authenticated
+  using (public.has_role('{admin,marketer}')) with check (public.has_role('{admin,marketer}'));
+
+-- design tasks
+create policy p_task_read on public.design_tasks for select to authenticated
+  using (public.has_role('{admin,marketer,designer}'));
+create policy p_task_ins on public.design_tasks for insert to authenticated
+  with check (public.has_role('{admin,marketer}'));
+create policy p_task_upd_mgr on public.design_tasks for update to authenticated
+  using (public.has_role('{admin,marketer}'));
+create policy p_task_upd_designer on public.design_tasks for update to authenticated
+  using (public.has_role('{designer}') and (assignee_id = auth.uid() or assignee_id is null))
+  with check (assignee_id = auth.uid());
+create policy p_task_del on public.design_tasks for delete to authenticated using (public.has_role('{admin,marketer}'));
+
+-- proofs
+create policy p_proof_read on public.task_proofs for select to authenticated using (public.has_role('{admin,marketer,designer}'));
+create policy p_proof_ins  on public.task_proofs for insert to authenticated with check (public.has_role('{admin,marketer,designer}'));
+create policy p_proof_upd  on public.task_proofs for update to authenticated
+  using (public.has_role('{admin,marketer}') or uploaded_by = auth.uid());
+create policy p_proof_del  on public.task_proofs for delete to authenticated
+  using (public.is_admin() or (uploaded_by = auth.uid() and status = 'pending'));
+
+-- comments
+create policy p_cmt_read on public.task_comments for select to authenticated using (public.has_role('{admin,marketer,designer}'));
+create policy p_cmt_ins  on public.task_comments for insert to authenticated
+  with check (public.has_role('{admin,marketer,designer}') and author_id = auth.uid());
+create policy p_cmt_del  on public.task_comments for delete to authenticated using (public.is_admin() or author_id = auth.uid());
+
+-- time logs: own rows; admin sees all; marketer reads all (for monitoring)
+create policy p_time_read on public.time_logs for select to authenticated
+  using (user_id = auth.uid() or public.has_role('{admin,marketer}'));
+create policy p_time_ins on public.time_logs for insert to authenticated with check (user_id = auth.uid() or public.is_admin());
+create policy p_time_upd on public.time_logs for update to authenticated using (user_id = auth.uid() or public.is_admin());
+create policy p_time_del on public.time_logs for delete to authenticated using (user_id = auth.uid() or public.is_admin());
+
+-- queries: visible to sender, recipient, recipient role, admin
+create policy p_q_read on public.queries for select to authenticated
+  using (public.is_admin() or from_user = auth.uid() or to_user = auth.uid() or to_role = public.my_role());
+create policy p_q_ins  on public.queries for insert to authenticated with check (from_user = auth.uid());
+create policy p_q_upd  on public.queries for update to authenticated
+  using (public.is_admin() or from_user = auth.uid() or to_user = auth.uid() or to_role = public.my_role());
+create policy p_q_del  on public.queries for delete to authenticated using (public.is_admin() or from_user = auth.uid());
+
+create policy p_qr_read on public.query_replies for select to authenticated
+  using (exists (select 1 from public.queries q where q.id = query_id));
+create policy p_qr_ins on public.query_replies for insert to authenticated
+  with check (author_id = auth.uid() and exists (select 1 from public.queries q where q.id = query_id));
+
+-- content calendar: admin/marketer write; designer read
+create policy p_post_read  on public.content_posts for select to authenticated using (public.has_role('{admin,marketer,designer}'));
+create policy p_post_write on public.content_posts for all to authenticated
+  using (public.has_role('{admin,marketer}')) with check (public.has_role('{admin,marketer}'));
+
+create policy p_links on public.approval_links for all to authenticated
+  using (public.has_role('{admin,marketer}')) with check (public.has_role('{admin,marketer}'));
+
+-- quotations: admin/marketer/finance
+create policy p_quote on public.quotations for all to authenticated
+  using (public.has_role('{admin,marketer,finance}')) with check (public.has_role('{admin,marketer,finance}'));
+
+-- invoices/payments/expenses: admin + finance (marketer can read invoices to follow up)
+create policy p_inv_rw   on public.invoices for all to authenticated
+  using (public.has_role('{admin,finance}')) with check (public.has_role('{admin,finance}'));
+create policy p_inv_mkt  on public.invoices for select to authenticated using (public.has_role('{marketer}'));
+create policy p_pay_rw   on public.payments for all to authenticated
+  using (public.has_role('{admin,finance}')) with check (public.has_role('{admin,finance}'));
+create policy p_exp_rw   on public.expenses for all to authenticated
+  using (public.has_role('{admin,finance}')) with check (public.has_role('{admin,finance}'));
+
+-- notifications: own only
+create policy p_notif_read on public.notifications for select to authenticated using (user_id = auth.uid());
+create policy p_notif_upd  on public.notifications for update to authenticated using (user_id = auth.uid());
+create policy p_notif_del  on public.notifications for delete to authenticated using (user_id = auth.uid());
+
+-- activity log: admin reads; anyone signed in can append
+create policy p_act_read on public.activity_log for select to authenticated using (public.is_admin());
+create policy p_act_ins  on public.activity_log for insert to authenticated with check (actor_id = auth.uid());
+
+-- ---------------------------------------------------------------------
+-- 14. STORAGE BUCKETS (proofs, receipts, files)
+-- ---------------------------------------------------------------------
+insert into storage.buckets (id, name, public) values
+  ('proofs','proofs', false), ('receipts','receipts', false), ('files','files', false)
+on conflict (id) do nothing;
+
+drop policy if exists "erp read proofs" on storage.objects;
+drop policy if exists "erp write proofs" on storage.objects;
+drop policy if exists "erp delete proofs" on storage.objects;
+drop policy if exists "erp receipts" on storage.objects;
+drop policy if exists "erp files" on storage.objects;
+
+create policy "erp read proofs" on storage.objects for select to authenticated
+  using (bucket_id = 'proofs' and public.has_role('{admin,marketer,designer}'));
+create policy "erp write proofs" on storage.objects for insert to authenticated
+  with check (bucket_id = 'proofs' and public.has_role('{admin,marketer,designer}'));
+create policy "erp delete proofs" on storage.objects for delete to authenticated
+  using (bucket_id = 'proofs' and (public.is_admin() or owner = auth.uid()));
+create policy "erp receipts" on storage.objects for all to authenticated
+  using (bucket_id = 'receipts' and public.has_role('{admin,finance}'))
+  with check (bucket_id = 'receipts' and public.has_role('{admin,finance}'));
+create policy "erp files" on storage.objects for all to authenticated
+  using (bucket_id = 'files' and public.my_role() is not null)
+  with check (bucket_id = 'files' and public.my_role() is not null);
+
+-- client portal needs to show proof images: signed URLs are generated by a
+-- security-definer-free path, so we expose a tiny function returning the path
+-- and let the portal request a signed URL via the Netlify function.
+
+-- ---------------------------------------------------------------------
+-- 15. REALTIME (live updates for tasks, comments, queries, notifications)
+-- ---------------------------------------------------------------------
+do $$ begin
+  begin alter publication supabase_realtime add table public.notifications;  exception when others then null; end;
+  begin alter publication supabase_realtime add table public.task_comments;  exception when others then null; end;
+  begin alter publication supabase_realtime add table public.query_replies;  exception when others then null; end;
+  begin alter publication supabase_realtime add table public.design_tasks;   exception when others then null; end;
+end $$;
+
+-- ---------------------------------------------------------------------
+-- 16. STARTER SERVICE CATALOGUE (edit prices in Settings → Services)
+-- ---------------------------------------------------------------------
+insert into public.services (name, category, unit, rate)
+select * from (values
+  ('Social Media Management – Starter (12 posts)', 'Social Media', 'per month', 8000),
+  ('Social Media Management – Growth (20 posts + 4 reels)', 'Social Media', 'per month', 15000),
+  ('Social Media Management – Premium (30 posts + 8 reels)', 'Social Media', 'per month', 25000),
+  ('Static Post Design', 'Design', 'per item', 500),
+  ('Carousel Design (up to 5 slides)', 'Design', 'per item', 1200),
+  ('Story Design', 'Design', 'per item', 300),
+  ('Reel Editing (up to 30 sec)', 'Video', 'per item', 1500),
+  ('Logo Design', 'Branding', 'per project', 5000),
+  ('Brand Identity Kit', 'Branding', 'per project', 15000),
+  ('Brochure / Flyer Design', 'Design', 'per item', 2000),
+  ('Meta Ads Management', 'Ads', 'per month', 6000),
+  ('Google Ads Management', 'Ads', 'per month', 7000),
+  ('SEO – Local / Google Business Profile', 'SEO', 'per month', 5000),
+  ('Website Design – Landing Page', 'Web', 'per project', 15000),
+  ('Product / Promo Shoot', 'Video', 'per project', 8000)
+) v(name, category, unit, rate)
+where not exists (select 1 from public.services);
+
+-- ---------------------------------------------------------------------
+-- 17. GRANTS (Supabase sets these by default; repeated here for safety)
+-- ---------------------------------------------------------------------
+grant usage on schema public to anon, authenticated;
+grant select, insert, update, delete on all tables in schema public to authenticated;
+grant usage, select on all sequences in schema public to authenticated;
+grant execute on function public.convert_lead(uuid) to authenticated;
+grant execute on function public.generate_retainer_invoices(date) to authenticated;
