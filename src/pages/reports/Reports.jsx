@@ -3,7 +3,7 @@ import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, Legend, PieChart, Pie, Cell
 } from 'recharts'
 import { Download, Printer } from 'lucide-react'
-import { supabase, q } from '../../lib/supabase'
+import { supabase, q, DEMO } from '../../lib/supabase'
 import { useData } from '../../lib/hooks'
 import { useAuth } from '../../lib/auth'
 import { LEAD_STAGES, LEAD_SOURCES } from '../../lib/constants'
@@ -41,7 +41,7 @@ export default function Reports() {
   return (
     <>
       <PageHeader title="Reports" subtitle="Know which clients, services and people make the agency money."
-        actions={<Button variant="outline" icon={Printer} onClick={() => window.print()}>Print</Button>} />
+        actions={!DEMO && <Button variant="outline" icon={Printer} onClick={() => window.print()}>Print</Button>} />
       {tab !== 'receivables' && (
         <div className="filters no-print">
           <Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} style={{ width: 160 }} />
@@ -68,12 +68,14 @@ function ChartCard({ title, children, h = 280 }) {
 /* ---------------- P&L ---------------- */
 function PnL({ from, to }) {
   const { data, loading } = useData(async () => {
-    const [inv, pay, exp] = await Promise.all([
+    const [inv, pay, exp, sb, sp] = await Promise.all([
       q(supabase.from('invoices').select('issue_date,total,status').neq('status', 'cancelled').neq('status', 'draft').gte('issue_date', from).lte('issue_date', to)),
       q(supabase.from('payments').select('paid_on,amount').gte('paid_on', from).lte('paid_on', to)),
-      q(supabase.from('expenses').select('spent_on,amount,category,rebillable').gte('spent_on', from).lte('spent_on', to))
+      q(supabase.from('expenses').select('spent_on,amount,category,rebillable').gte('spent_on', from).lte('spent_on', to)),
+      q(supabase.from('supplier_bills').select('order_date,total,status').neq('status', 'cancelled').gte('order_date', from).lte('order_date', to)),
+      q(supabase.from('supplier_payments').select('paid_on,amount').gte('paid_on', from).lte('paid_on', to))
     ])
-    return { inv, pay, exp }
+    return { inv, pay, exp, sb, sp }
   }, [from, to], null)
   if (loading || !data) return <Loading />
   const months = monthsBetween(from, to)
@@ -82,28 +84,33 @@ function PnL({ from, to }) {
       k, m: mLabel(k),
       Invoiced: data.inv.filter((x) => x.issue_date.startsWith(k)).reduce((a, x) => a + Number(x.total), 0),
       Collected: data.pay.filter((x) => x.paid_on.startsWith(k)).reduce((a, x) => a + Number(x.amount), 0),
-      Expenses: data.exp.filter((x) => x.spent_on.startsWith(k)).reduce((a, x) => a + Number(x.amount), 0)
+      Expenses: data.exp.filter((x) => x.spent_on.startsWith(k)).reduce((a, x) => a + Number(x.amount), 0),
+      Suppliers: data.sb.filter((x) => x.order_date.startsWith(k)).reduce((a, x) => a + Number(x.total), 0),
+      SupPaid: data.sp.filter((x) => x.paid_on.startsWith(k)).reduce((a, x) => a + Number(x.amount), 0)
     }
-    r.Profit = r.Invoiced - r.Expenses; r.Cash = r.Collected - r.Expenses
+    r.Costs = r.Expenses + r.Suppliers
+    r.Profit = r.Invoiced - r.Costs; r.Cash = r.Collected - r.Expenses - r.SupPaid
     return r
   })
-  const T = rows.reduce((a, r) => ({ Invoiced: a.Invoiced + r.Invoiced, Collected: a.Collected + r.Collected, Expenses: a.Expenses + r.Expenses }), { Invoiced: 0, Collected: 0, Expenses: 0 })
+  const T = rows.reduce((a, r) => ({ Invoiced: a.Invoiced + r.Invoiced, Collected: a.Collected + r.Collected, Expenses: a.Expenses + r.Expenses, Suppliers: a.Suppliers + r.Suppliers, SupPaid: a.SupPaid + r.SupPaid }), { Invoiced: 0, Collected: 0, Expenses: 0, Suppliers: 0, SupPaid: 0 })
+  const profit = T.Invoiced - T.Expenses - T.Suppliers, cash = T.Collected - T.Expenses - T.SupPaid
   const byCat = Object.entries(data.exp.reduce((a, e) => ({ ...a, [e.category]: (a[e.category] || 0) + Number(e.amount) }), {})).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value)
   return (
     <>
       <div className="stats">
         <Stat label="Revenue (invoiced)" value={money(T.Invoiced)} />
         <Stat label="Cash collected" value={money(T.Collected)} tone="teal" />
+        <Stat label="Supplier costs" value={money(T.Suppliers)} sub={`${money(T.SupPaid)} paid out`} tone="orange" />
         <Stat label="Expenses" value={money(T.Expenses)} tone="red" />
-        <Stat label="Profit (accrual)" value={money(T.Invoiced - T.Expenses)} sub={`${pct(T.Invoiced - T.Expenses, T.Invoiced)}% margin`} tone={T.Invoiced - T.Expenses >= 0 ? 'green' : 'red'} />
-        <Stat label="Net cash flow" value={money(T.Collected - T.Expenses)} tone="violet" />
+        <Stat label="Profit (accrual)" value={money(profit)} sub={`${pct(profit, T.Invoiced)}% margin`} tone={profit >= 0 ? 'green' : 'red'} />
+        <Stat label="Net cash flow" value={money(cash)} sub="In − expenses − supplier payments" tone="violet" />
       </div>
       <div className="grid g-2-1">
         <ChartCard title="Monthly revenue, expenses and profit">
           <BarChart data={rows}>
             <CartesianGrid vertical={false} stroke="#eee" /><XAxis dataKey="m" fontSize={12} tickLine={false} axisLine={false} /><YAxis tickFormatter={compact} fontSize={12} width={56} tickLine={false} axisLine={false} />
             <Tooltip formatter={(v) => money(v)} /><Legend iconType="circle" wrapperStyle={{ fontSize: 12 }} />
-            <Bar dataKey="Invoiced" fill="#1ba76a" radius={[4, 4, 0, 0]} /><Bar dataKey="Expenses" fill="#2b1416" radius={[4, 4, 0, 0]} /><Bar dataKey="Profit" fill="#c98a0c" radius={[4, 4, 0, 0]} />
+            <Bar dataKey="Invoiced" fill="#1ba76a" radius={[4, 4, 0, 0]} /><Bar dataKey="Costs" name="Expenses + suppliers" fill="#2b1416" radius={[4, 4, 0, 0]} /><Bar dataKey="Profit" fill="#c98a0c" radius={[4, 4, 0, 0]} />
           </BarChart>
         </ChartCard>
         <ChartCard title="Expenses by category">
@@ -114,11 +121,11 @@ function PnL({ from, to }) {
           </PieChart>
         </ChartCard>
       </div>
-      <Card className="mt" title="Monthly statement" actions={<Button size="sm" variant="ghost" icon={Download} onClick={() => downloadCSV('pnl.csv', rows.map(({ k, m, ...r }) => ({ month: k, ...r })))}>CSV</Button>} pad={false}>
+      <Card className="mt" title="Monthly statement" actions={<Button size="sm" variant="ghost" icon={Download} onClick={() => downloadCSV('pnl.csv', rows.map(({ k, m, Costs, ...r }) => ({ month: k, ...r })))}>CSV</Button>} pad={false}>
         <div className="table-wrap"><table className="table">
-          <thead><tr><th>Month</th><th className="num">Invoiced</th><th className="num">Collected</th><th className="num">Expenses</th><th className="num">Profit</th><th className="num">Net cash</th></tr></thead>
-          <tbody>{rows.map((r) => <tr key={r.k}><td>{r.m}</td><td className="num">{money(r.Invoiced)}</td><td className="num">{money(r.Collected)}</td><td className="num">{money(r.Expenses)}</td><td className="num strong" style={{ color: r.Profit < 0 ? 'var(--red)' : undefined }}>{money(r.Profit)}</td><td className="num">{money(r.Cash)}</td></tr>)}</tbody>
-          <tfoot><tr><td>Total</td><td className="num">{money(T.Invoiced)}</td><td className="num">{money(T.Collected)}</td><td className="num">{money(T.Expenses)}</td><td className="num">{money(T.Invoiced - T.Expenses)}</td><td className="num">{money(T.Collected - T.Expenses)}</td></tr></tfoot>
+          <thead><tr><th>Month</th><th className="num">Invoiced</th><th className="num">Collected</th><th className="num">Supplier costs</th><th className="num">Expenses</th><th className="num">Profit</th><th className="num">Net cash</th></tr></thead>
+          <tbody>{rows.map((r) => <tr key={r.k}><td>{r.m}</td><td className="num">{money(r.Invoiced)}</td><td className="num">{money(r.Collected)}</td><td className="num">{money(r.Suppliers)}</td><td className="num">{money(r.Expenses)}</td><td className="num strong" style={{ color: r.Profit < 0 ? 'var(--red)' : undefined }}>{money(r.Profit)}</td><td className="num">{money(r.Cash)}</td></tr>)}</tbody>
+          <tfoot><tr><td>Total</td><td className="num">{money(T.Invoiced)}</td><td className="num">{money(T.Collected)}</td><td className="num">{money(T.Suppliers)}</td><td className="num">{money(T.Expenses)}</td><td className="num">{money(profit)}</td><td className="num">{money(cash)}</td></tr></tfoot>
         </table></div>
       </Card>
       <Card className="mt" title="Expense breakdown" pad={false}>
@@ -161,15 +168,16 @@ function Receivables() {
 function ClientProfit({ from, to }) {
   const { team, can } = useAuth()
   const { data, loading } = useData(async () => {
-    const [clients, inv, logs, tasks, exp, packs] = await Promise.all([
+    const [clients, inv, logs, tasks, exp, packs, alloc] = await Promise.all([
       q(supabase.from('clients').select('id,name,status')),
       can('finance') ? q(supabase.from('invoices').select('client_id,total,status,issue_date').neq('status', 'cancelled').neq('status', 'draft').gte('issue_date', from).lte('issue_date', to)) : [],
       q(supabase.from('time_logs').select('client_id,user_id,minutes,billable').gte('log_date', from).lte('log_date', to)),
       can('marketer') ? q(supabase.from('design_tasks').select('client_id,status,revision_count,delivered_at').gte('created_at', from).lte('created_at', to + 'T23:59:59')) : [],
       can('finance') ? q(supabase.from('expenses').select('client_id,amount,rebillable').not('client_id', 'is', null).gte('spent_on', from).lte('spent_on', to)) : [],
-      q(supabase.from('packages').select('client_id,fee,billing_type,status').eq('status', 'active'))
+      q(supabase.from('packages').select('client_id,fee,billing_type,status').eq('status', 'active')),
+      can('finance') ? q(supabase.from('supplier_bill_allocations').select('client_id,amount, supplier_bills(order_date,status)')) : []
     ])
-    return { clients, inv, logs, tasks, exp, packs }
+    return { clients, inv, logs, tasks, exp, packs, alloc: alloc.filter((a) => a.supplier_bills && a.supplier_bills.status !== 'cancelled' && a.supplier_bills.order_date >= from && a.supplier_bills.order_date <= to) }
   }, [from, to], null)
   const rate = (uid) => Number(team.find((m) => m.id === uid)?.cost_per_hour || 0)
   const rows = useMemo(() => !data ? [] : data.clients.map((c) => {
@@ -178,11 +186,12 @@ function ClientProfit({ from, to }) {
     const mins = logs.reduce((a, l) => a + l.minutes, 0)
     const labour = logs.reduce((a, l) => a + (l.minutes / 60) * rate(l.user_id), 0)
     const direct = data.exp.filter((e) => e.client_id === c.id && !e.rebillable).reduce((a, e) => a + Number(e.amount), 0)
+      + data.alloc.filter((a) => a.client_id === c.id).reduce((s, a) => s + Number(a.amount), 0)
     const t = data.tasks.filter((x) => x.client_id === c.id)
     const profit = revenue - labour - direct
     return { ...c, revenue, mins, labour, direct, profit, margin: pct(profit, revenue), tasks: t.length, revs: t.length ? (t.reduce((a, x) => a + x.revision_count, 0) / t.length) : 0,
       mrr: data.packs.filter((p) => p.client_id === c.id).reduce((a, p) => a + monthly(p), 0), effRate: mins ? revenue / (mins / 60) : 0 }
-  }).filter((r) => r.revenue || r.mins || r.tasks).sort((a, b) => b.revenue - a.revenue || b.mins - a.mins), [data, team])
+  }).filter((r) => r.revenue || r.mins || r.tasks || r.direct).sort((a, b) => b.revenue - a.revenue || b.mins - a.mins), [data, team])
   if (loading || !data) return <Loading />
   const noRates = team.every((m) => !Number(m.cost_per_hour))
   return (
@@ -199,7 +208,7 @@ function ClientProfit({ from, to }) {
           </ChartCard>}
           <Card className="mt" title="Client scorecard" pad={false} actions={<Button size="sm" variant="ghost" icon={Download} onClick={() => downloadCSV('client-profitability.csv', rows.map((r) => ({ client: r.name, revenue: r.revenue, hours: (r.mins / 60).toFixed(1), labour_cost: Math.round(r.labour), direct_cost: r.direct, profit: Math.round(r.profit), margin_pct: r.margin, tasks: r.tasks, avg_revisions: r.revs.toFixed(1) })))}>CSV</Button>}>
             <div className="table-wrap"><table className="table">
-              <thead><tr><th>Client</th>{can('finance') && <th className="num">Revenue</th>}<th className="num">Monthly fee</th><th className="num">Hours</th>{can('finance') && <><th className="num">Labour cost</th><th className="num">Direct cost</th><th className="num">Profit</th><th className="num">Margin</th><th className="num">₹ / hour</th></>}<th className="num">Tasks</th><th className="num">Avg revisions</th></tr></thead>
+              <thead><tr><th>Client</th>{can('finance') && <th className="num">Revenue</th>}<th className="num">Monthly fee</th><th className="num">Hours</th>{can('finance') && <><th className="num">Labour cost</th><th className="num">Supplier & direct cost</th><th className="num">Profit</th><th className="num">Margin</th><th className="num">₹ / hour</th></>}<th className="num">Tasks</th><th className="num">Avg revisions</th></tr></thead>
               <tbody>{rows.map((r) => (
                 <tr key={r.id}>
                   <td className="cell-title">{r.name}</td>

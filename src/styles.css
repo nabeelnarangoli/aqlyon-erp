@@ -164,7 +164,7 @@ table.table { width: 100%; border-collapse: collapse; }
 .table tr:last-child td { border-bottom: 0; }
 .table tbody tr.click { cursor: pointer; }
 .table tbody tr.click:hover td { background: #fbfcfa; }
-.table td.num, .table th.num { text-align: right; font-variant-numeric: tabular-nums; }
+.table td.num, .table th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .table tfoot td { font-weight: 700; background: var(--surface-2); border-top: 1px solid var(--line); }
 .cell-title { font-weight: 600; color: var(--ink); }
 .cell-sub { font-size: 12px; color: var(--text-3); }

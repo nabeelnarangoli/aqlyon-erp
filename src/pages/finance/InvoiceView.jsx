@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { ArrowLeft, Printer, Pencil, Send, Wallet, MessageCircle, Ban, Copy, FileCheck2, Trash2, CheckCircle2, XCircle } from 'lucide-react'
-import { supabase, q } from '../../lib/supabase'
+import { supabase, q, DEMO } from '../../lib/supabase'
 import { useData } from '../../lib/hooks'
 import { useAuth } from '../../lib/auth'
 import { INVOICE_STATUS, QUOTE_STATUS } from '../../lib/constants'
@@ -9,6 +9,7 @@ import { money2, date, amountInWords, waLink, todayISO, addDays } from '../../li
 import { Button, StatusBadge, Card, Loading, ErrorBox, IconBtn, useAction, useToast } from '../../components/ui'
 import DocEditor from './DocEditor'
 import { PaymentModal } from './Invoices'
+import { MoneyFlow } from './Suppliers'
 
 export default function InvoiceView({ kind }) {
   const { id } = useParams()
@@ -76,7 +77,7 @@ export default function InvoiceView({ kind }) {
         <button className="btn btn-ghost btn-sm" onClick={() => nav(-1)}><ArrowLeft size={14} />Back</button>
         <div className="row gap-s wrap">
           <StatusBadge list={kind === 'invoice' ? INVOICE_STATUS : QUOTE_STATUS} value={d.status} />
-          <Button variant="outline" icon={Printer} onClick={() => window.print()}>Print / PDF</Button>
+          {!DEMO && <Button variant="outline" icon={Printer} onClick={() => window.print()}>Print / PDF</Button>}
           {(c?.whatsapp || c?.phone) && <Button variant="outline" icon={MessageCircle} onClick={share}>WhatsApp</Button>}
           {canEdit && <Button variant="outline" icon={Copy} onClick={duplicate}>Duplicate</Button>}
           {canEdit && d.status === 'draft' && <Button variant="outline" icon={Send} onClick={() => setStatus('sent', 'Marked as sent')}>Mark sent</Button>}
@@ -148,6 +149,7 @@ export default function InvoiceView({ kind }) {
           </div>
         </Card>
       )}
+      {kind === 'invoice' && can('finance', 'marketer') && <MoneyFlow invoice={d} />}
       {editing && <DocEditor kind={kind} doc={d} onClose={() => setEditing(false)} onSaved={() => { setEditing(false); doc.reload() }} />}
       {paying && <PaymentModal invoice={d} payment={paying.id ? paying : null} onClose={() => setPaying(null)} onSaved={() => { setPaying(null); pays.reload(); doc.reload() }} />}
     </>

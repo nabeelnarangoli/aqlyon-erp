@@ -1,13 +1,27 @@
 import { createClient } from '@supabase/supabase-js'
+import { demoClient, demoApi, demoFileUrls } from './demo'
 
+export const DEMO = import.meta.env.VITE_DEMO === '1'
 const url = import.meta.env.VITE_SUPABASE_URL
 const key = import.meta.env.VITE_SUPABASE_ANON_KEY
 
-export const configured = Boolean(url && key && !url.includes('YOUR-PROJECT'))
+export const configured = DEMO || Boolean(url && key && !url.includes('YOUR-PROJECT'))
 
-export const supabase = configured
-  ? createClient(url, key, { auth: { persistSession: true, autoRefreshToken: true } })
-  : null
+export const supabase = DEMO
+  ? demoClient
+  : configured
+    ? createClient(url, key, { auth: { persistSession: true, autoRefreshToken: true } })
+    : null
+
+/** Absolute link to a route inside the app (hash routing in demo builds). */
+export const appLink = (path) => (DEMO ? `${window.location.href.split('#')[0]}#${path}` : `${window.location.origin}${path}`)
+
+/** Signed URLs for proof files shown on the public client portal. */
+export async function portalFileUrls(token, ids) {
+  if (DEMO) return demoFileUrls(ids)
+  const r = await fetch('/api/portal-file', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token, proof_ids: ids }) })
+  return (await r.json()).urls || {}
+}
 
 /** Throw on Supabase error, return data. */
 export async function q(promise) {
@@ -18,6 +32,7 @@ export async function q(promise) {
 
 /** Call a Netlify function with the user's access token. */
 export async function api(name, body) {
+  if (DEMO) return demoApi(name, body)
   const { data: { session } } = await supabase.auth.getSession()
   const res = await fetch(`/api/${name}`, {
     method: 'POST',

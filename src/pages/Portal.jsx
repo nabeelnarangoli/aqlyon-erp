@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { CheckCircle2, MessageSquareWarning, ExternalLink, FileText, Film, Loader2 } from 'lucide-react'
-import { supabase, configured } from '../lib/supabase'
+import { supabase, configured, portalFileUrls, DEMO } from '../lib/supabase'
 import { date } from '../lib/format'
 
 // Public, no-login page where a client approves posts and design proofs.
@@ -19,8 +19,7 @@ export default function Portal() {
     setData(d)
     const ids = (d.proofs || []).filter((p) => p.file_path).map((p) => p.id)
     if (ids.length) {
-      fetch('/api/portal-file', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token, proof_ids: ids }) })
-        .then((r) => r.json()).then((r) => setUrls(r.urls || {})).catch(() => {})
+      portalFileUrls(token, ids).then(setUrls).catch(() => {})
     }
   }
   useEffect(() => { load() }, [token]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -68,6 +67,7 @@ function Shell({ children, company }) {
         <div className="portal-head">
           <img src="/logo-full.png" alt="Aqlyon Brand Management" />
           {company && <span className="small muted">{company.phone}{company.website && ` · ${company.website}`}</span>}
+          {DEMO && <a className="btn btn-sm btn-outline" href="#/clients">← Back to ERP (demo)</a>}
         </div>
         {children}
       </div>

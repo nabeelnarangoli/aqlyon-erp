@@ -23,6 +23,8 @@ const InvoiceView = lazy(() => import('./pages/finance/InvoiceView'))
 const Quotations = lazy(() => import('./pages/finance/Quotations'))
 const Payments = lazy(() => import('./pages/finance/Payments'))
 const Expenses = lazy(() => import('./pages/finance/Expenses'))
+const Suppliers = lazy(() => import('./pages/finance/Suppliers'))
+const WorkOrders = lazy(() => import('./pages/finance/Suppliers').then((m) => ({ default: m.WorkOrders })))
 const Reports = lazy(() => import('./pages/reports/Reports'))
 const Team = lazy(() => import('./pages/admin/Team'))
 const SettingsPage = lazy(() => import('./pages/admin/Settings'))
@@ -88,6 +90,9 @@ function Gate() {
           <Route path="finance/quotations/:id" element={<Guard roles={[...F, ...M]}><InvoiceView kind="quote" /></Guard>} />
           <Route path="finance/payments" element={<Guard roles={F}><Payments /></Guard>} />
           <Route path="finance/expenses" element={<Guard roles={F}><Expenses /></Guard>} />
+          <Route path="finance/suppliers" element={<Guard roles={[...F, ...M]}><Suppliers /></Guard>} />
+          <Route path="finance/suppliers/:id" element={<Guard roles={[...F, ...M]}><Suppliers /></Guard>} />
+          <Route path="finance/work-orders" element={<Guard roles={[...F, ...M]}><WorkOrders /></Guard>} />
           <Route path="reports" element={<Guard roles={[...M, ...D, ...F]}><Reports /></Guard>} />
           <Route path="team" element={<Guard roles={[]}><Team /></Guard>} />
           <Route path="settings" element={<Guard roles={[]}><SettingsPage /></Guard>} />

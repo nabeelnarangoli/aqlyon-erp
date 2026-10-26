@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { CheckCircle2 } from 'lucide-react'
-import { supabase } from '../lib/supabase'
+import { supabase, DEMO } from '../lib/supabase'
 import { Button, Field, Input } from '../components/ui'
 
 export default function Login() {
@@ -15,7 +15,7 @@ export default function Login() {
     setBusy(true); setMsg(null)
     if (mode === 'login') {
       const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password })
-      if (error) setMsg({ type: 'error', text: error.message === 'Invalid login credentials' ? 'Wrong email or password.' : error.message })
+      if (error) setMsg({ type: 'error', text: error.message === 'Invalid login credentials' ? DEMO ? 'Wrong username or password.' : 'Wrong email or password.' : error.message })
     } else {
       const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), { redirectTo: window.location.origin })
       setMsg(error ? { type: 'error', text: error.message } : { type: 'ok', text: 'Password reset link sent. Check your email.' })
@@ -46,14 +46,15 @@ export default function Login() {
             <p className="muted small">{mode === 'login' ? 'Use the account your admin created for you.' : 'We’ll email you a reset link.'}</p>
           </div>
           {msg && <div className={`alert ${msg.type === 'error' ? 'alert-error' : 'alert-ok'}`}>{msg.text}</div>}
-          <Field label="Email"><Input type="email" autoComplete="email" required value={email} onChange={(e) => setEmail(e.target.value)} /></Field>
+          <><Field label={DEMO ? 'Username' : 'Email'}><Input type={DEMO ? 'text' : 'email'} autoComplete="username" required value={email} onChange={(e) => setEmail(e.target.value)} /></Field>
           {mode === 'login' && <Field label="Password"><Input type="password" autoComplete="current-password" required value={password} onChange={(e) => setPassword(e.target.value)} /></Field>}
           <Button type="submit" size="lg" loading={busy}>{mode === 'login' ? 'Sign in' : 'Send reset link'}</Button>
           <button type="button" className="btn btn-ghost btn-sm" onClick={() => { setMode(mode === 'login' ? 'forgot' : 'login'); setMsg(null) }}>
             {mode === 'login' ? 'Forgot password?' : '← Back to sign in'}
-          </button>
+          </button></>
         </form>
       </div>
     </div>
   )
 }
+

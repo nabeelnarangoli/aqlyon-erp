@@ -44,10 +44,12 @@ export default function Dashboard() {
 function useFinance(months = 6) {
   return useData(async () => {
     const start = new Date(); start.setMonth(start.getMonth() - (months - 1)); const from = monthStart(start)
-    const [inv, pay, exp] = await Promise.all([
+    const [inv, pay, exp, sb, sp] = await Promise.all([
       q(supabase.from('invoices').select('issue_date,total,amount_paid,status,due_date').neq('status', 'cancelled')),
       q(supabase.from('payments').select('paid_on,amount').gte('paid_on', from)),
-      q(supabase.from('expenses').select('spent_on,amount').gte('spent_on', from))
+      q(supabase.from('expenses').select('spent_on,amount').gte('spent_on', from)),
+      q(supabase.from('supplier_bills').select('total,amount_paid,status').neq('status', 'cancelled')),
+      q(supabase.from('supplier_payments').select('paid_on,amount').gte('paid_on', from))
     ])
     const series = Array.from({ length: months }, (_, i) => {
       const d = new Date(start.getFullYear(), start.getMonth() + i, 1); const k = toISO(d).slice(0, 7)
@@ -56,13 +58,15 @@ function useFinance(months = 6) {
         Invoiced: inv.filter((x) => x.issue_date.startsWith(k)).reduce((a, x) => a + Number(x.total), 0),
         Collected: pay.filter((x) => x.paid_on.startsWith(k)).reduce((a, x) => a + Number(x.amount), 0),
         Expenses: exp.filter((x) => x.spent_on.startsWith(k)).reduce((a, x) => a + Number(x.amount), 0)
+          + sp.filter((x) => x.paid_on.startsWith(k)).reduce((a, x) => a + Number(x.amount), 0)
       }
     })
     const open = inv.filter((x) => ['sent', 'partial'].includes(x.status))
     const outstanding = open.reduce((a, x) => a + Number(x.total) - Number(x.amount_paid), 0)
     const overdue = open.filter((x) => daysFrom(x.due_date) < 0).reduce((a, x) => a + Number(x.total) - Number(x.amount_paid), 0)
     const cur = series[series.length - 1]
-    return { series, outstanding, overdue, cur, drafts: inv.filter((x) => x.status === 'draft').length }
+    const payable = sb.reduce((a, x) => a + Number(x.total) - Number(x.amount_paid), 0)
+    return { series, outstanding, overdue, cur, payable, drafts: inv.filter((x) => x.status === 'draft').length }
   }, [], null)
 }
 
@@ -79,7 +83,7 @@ function CashChart({ data }) {
             <Legend iconType="circle" wrapperStyle={{ fontSize: 12 }} />
             <Bar dataKey="Invoiced" fill="#b9e6d0" radius={[4, 4, 0, 0]} />
             <Bar dataKey="Collected" fill="#1ba76a" radius={[4, 4, 0, 0]} />
-            <Bar dataKey="Expenses" fill="#2b1416" radius={[4, 4, 0, 0]} />
+            <Bar dataKey="Expenses" name="Paid out" fill="#2b1416" radius={[4, 4, 0, 0]} />
           </BarChart>
         </ResponsiveContainer>
       </div>
@@ -148,8 +152,8 @@ function AdminDash() {
     <>
       <div className="stats">
         <Stat label="Monthly recurring revenue" value={money(mrr)} sub={`${o.clients.filter((c) => c.status === 'active').length} active clients`} icon={TrendingUp} onClick={() => nav('/clients')} />
-        <Stat label="Collected this month" value={money(fin.data.cur.Collected)} sub={`Expenses ${money(fin.data.cur.Expenses)}`} icon={Wallet} tone="teal" onClick={() => nav('/finance/payments')} />
-        <Stat label="Outstanding" value={money(fin.data.outstanding)} sub={`${money(fin.data.overdue)} overdue`} icon={Receipt} tone={fin.data.overdue ? 'red' : 'amber'} onClick={() => nav('/finance/invoices')} />
+        <Stat label="Collected this month" value={money(fin.data.cur.Collected)} sub={`Paid out ${money(fin.data.cur.Expenses)}`} icon={Wallet} tone="teal" onClick={() => nav('/finance/payments')} />
+        <Stat label="Outstanding from customers" value={money(fin.data.outstanding)} sub={`${money(fin.data.overdue)} overdue · ${money(fin.data.payable)} owed to suppliers`} icon={Receipt} tone={fin.data.overdue ? 'red' : 'amber'} onClick={() => nav('/finance/invoices')} />
         <Stat label="Open pipeline" value={money(pipe.reduce((a, l) => a + Number(l.estimated_value || 0), 0))} sub={`${pipe.length} leads`} icon={Target} tone="violet" onClick={() => nav('/leads')} />
         <Stat label="Design tasks in production" value={o.tasks.length} sub={`${overdue.length} overdue · ${review.length} to review`} icon={Palette} tone={overdue.length ? 'red' : 'blue'} onClick={() => nav('/tasks')} />
       </div>
@@ -318,7 +322,8 @@ function FinanceDash() {
         <Stat label="Outstanding" value={money(fin.data.outstanding)} icon={Wallet} tone="amber" onClick={() => nav('/finance/invoices')} />
         <Stat label="Overdue" value={money(fin.data.overdue)} sub={`${list.data.length} invoices`} icon={AlertTriangle} tone="red" />
         <Stat label="Collected this month" value={money(fin.data.cur.Collected)} icon={TrendingUp} onClick={() => nav('/finance/payments')} />
-        <Stat label="Expenses this month" value={money(fin.data.cur.Expenses)} sub={`Net ${money(fin.data.cur.Collected - fin.data.cur.Expenses)}`} icon={Receipt} tone="violet" onClick={() => nav('/finance/expenses')} />
+        <Stat label="Paid out this month" value={money(fin.data.cur.Expenses)} sub={`Net ${money(fin.data.cur.Collected - fin.data.cur.Expenses)}`} icon={Receipt} tone="violet" onClick={() => nav('/finance/payments')} />
+        <Stat label="Payable to suppliers" value={money(fin.data.payable)} icon={Wallet} tone="orange" onClick={() => nav('/finance/work-orders')} />
         <Stat label="Retainer run-rate" value={money(mrr)} sub={`${fin.data.drafts} draft invoices`} icon={FileText} tone="teal" />
       </div>
       <div className="grid g-2-1">

@@ -459,6 +459,84 @@ create table if not exists public.expenses (
 );
 
 -- ---------------------------------------------------------------------
+-- 7b. SUPPLIERS — outsourced work (freelancers, printers, videographers)
+--     A supplier work order can be assigned to one or many customers /
+--     invoices, and is paid in advance + balance instalments.
+-- ---------------------------------------------------------------------
+create sequence if not exists public.po_seq start 1;
+
+create table if not exists public.suppliers (
+  id           uuid primary key default gen_random_uuid(),
+  name         text not null,
+  category     text default 'Freelance Designer',  -- Freelance Designer, Printing Press, Videographer, Photographer, Developer, Ad Agency, Influencer, Other
+  contact_person text,
+  phone        text,
+  whatsapp     text,
+  email        text,
+  upi_id       text,
+  bank_details text,
+  notes        text,
+  active       boolean not null default true,
+  created_by   uuid references public.profiles(id) on delete set null default auth.uid(),
+  created_at   timestamptz not null default now()
+);
+
+create table if not exists public.supplier_bills (
+  id            uuid primary key default gen_random_uuid(),
+  number        text unique,
+  supplier_id   uuid not null references public.suppliers(id) on delete restrict,
+  order_date    date not null default current_date,
+  due_date      date,
+  title         text not null,              -- e.g. "Logo design – Kappad Beach Resort"
+  items         jsonb not null default '[]',
+  discount      numeric(12,2) not null default 0,
+  subtotal      numeric(12,2) not null default 0,
+  total         numeric(12,2) not null default 0,
+  amount_paid   numeric(12,2) not null default 0,
+  work_status   text not null default 'ordered' check (work_status in ('ordered','in_progress','received','cancelled')),
+  status        text not null default 'unpaid' check (status in ('unpaid','partial','paid','cancelled')),
+  supplier_ref  text,                       -- supplier's own bill / quote number
+  notes         text,
+  received_on   date,
+  created_by    uuid references public.profiles(id) on delete set null default auth.uid(),
+  created_at    timestamptz not null default now()
+);
+
+-- which customer(s) / invoice(s) / task a supplier cost belongs to
+create table if not exists public.supplier_bill_allocations (
+  id          uuid primary key default gen_random_uuid(),
+  bill_id     uuid not null references public.supplier_bills(id) on delete cascade,
+  client_id   uuid not null references public.clients(id) on delete cascade,
+  invoice_id  uuid references public.invoices(id) on delete set null,
+  task_id     uuid references public.design_tasks(id) on delete set null,
+  amount      numeric(12,2) not null check (amount >= 0),
+  note        text,
+  created_at  timestamptz not null default now()
+);
+
+create table if not exists public.supplier_payments (
+  id          uuid primary key default gen_random_uuid(),
+  supplier_id uuid not null references public.suppliers(id) on delete restrict,
+  bill_id     uuid references public.supplier_bills(id) on delete cascade,
+  paid_on     date not null default current_date,
+  amount      numeric(12,2) not null check (amount > 0),
+  kind        text not null default 'advance' check (kind in ('advance','part','final')),
+  method      text not null default 'UPI' check (method in ('Cash','UPI','Bank Transfer','Cheque','Card','Other')),
+  reference   text,
+  note        text,
+  created_by  uuid references public.profiles(id) on delete set null default auth.uid(),
+  created_at  timestamptz not null default now()
+);
+
+create index if not exists idx_sb_supplier on public.supplier_bills(supplier_id);
+create index if not exists idx_sba_bill on public.supplier_bill_allocations(bill_id);
+create index if not exists idx_sba_client on public.supplier_bill_allocations(client_id);
+create index if not exists idx_sba_invoice on public.supplier_bill_allocations(invoice_id);
+create index if not exists idx_sp_bill on public.supplier_payments(bill_id);
+
+alter table public.settings add column if not exists po_prefix text not null default 'AQB-PO';
+
+-- ---------------------------------------------------------------------
 -- 8. NOTIFICATIONS & ACTIVITY
 -- ---------------------------------------------------------------------
 create table if not exists public.notifications (
@@ -842,6 +920,63 @@ begin
   return n;
 end $$;
 
+
+-- supplier work orders: number + totals; payments keep amount_paid / status in sync
+drop trigger if exists trg_sb_totals on public.supplier_bills;
+create trigger trg_sb_totals before insert or update of items, discount on public.supplier_bills
+  for each row execute function public.compute_doc_totals();
+
+create or replace function public.sb_number() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  if new.number is null then
+    new.number := (select po_prefix from public.settings where id = 1) || '-' || to_char(new.order_date,'YYYY') || '-' || lpad(nextval('public.po_seq')::text, 4, '0');
+  end if;
+  if new.work_status = 'received' and new.received_on is null then new.received_on := current_date; end if;
+  return new;
+end $$;
+drop trigger if exists trg_sb_number on public.supplier_bills;
+create trigger trg_sb_number before insert or update on public.supplier_bills for each row execute function public.sb_number();
+
+create or replace function public.sync_supplier_bill() returns trigger
+language plpgsql security definer set search_path = public as $$
+declare b uuid := coalesce(new.bill_id, old.bill_id); paid numeric; tot numeric; cur text;
+begin
+  if b is null then return null; end if;
+  select coalesce(sum(amount),0) into paid from public.supplier_payments where bill_id = b;
+  select total, status into tot, cur from public.supplier_bills where id = b;
+  update public.supplier_bills set amount_paid = paid,
+    status = case when cur = 'cancelled' then cur when paid >= tot and tot > 0 then 'paid' when paid > 0 then 'partial' else 'unpaid' end
+  where id = b;
+  return null;
+end $$;
+drop trigger if exists trg_sp_sync on public.supplier_payments;
+create trigger trg_sp_sync after insert or update or delete on public.supplier_payments
+  for each row execute function public.sync_supplier_bill();
+
+create or replace function public.sp_fill_supplier() returns trigger language plpgsql as $$
+begin
+  if new.bill_id is not null then select supplier_id into new.supplier_id from public.supplier_bills where id = new.bill_id; end if;
+  return new;
+end $$;
+drop trigger if exists trg_sp_fill on public.supplier_payments;
+create trigger trg_sp_fill before insert or update on public.supplier_payments for each row execute function public.sp_fill_supplier();
+
+-- every money movement in one place (in = client payments, out = supplier payments + expenses)
+create or replace view public.v_money_movements with (security_invoker = true) as
+select p.id, p.paid_on as on_date, 'in'::text as direction, 'Client payment'::text as kind, p.amount, p.method, p.reference, p.note,
+       p.client_id, c.name as client_name, null::uuid as supplier_id, null::text as supplier_name, p.invoice_id, i.number as invoice_number,
+       null::uuid as bill_id, null::text as bill_number
+from public.payments p left join public.clients c on c.id = p.client_id left join public.invoices i on i.id = p.invoice_id
+union all
+select sp.id, sp.paid_on, 'out', 'Supplier payment (' || sp.kind || ')', sp.amount, sp.method, sp.reference, sp.note,
+       null, null, sp.supplier_id, s.name, null, null, sp.bill_id, b.number
+from public.supplier_payments sp join public.suppliers s on s.id = sp.supplier_id left join public.supplier_bills b on b.id = sp.bill_id
+union all
+select e.id, e.spent_on, 'out', 'Expense · ' || e.category, e.amount, e.method, e.vendor, e.description,
+       e.client_id, c.name, null, null, null, null, null, null
+from public.expenses e left join public.clients c on c.id = e.client_id;
+
 -- ---------------------------------------------------------------------
 -- 11. CLIENT APPROVAL PORTAL (public, token based, no login)
 -- ---------------------------------------------------------------------
@@ -941,7 +1076,8 @@ order by month;
 do $$ declare t text; begin
   foreach t in array array['profiles','settings','services','leads','clients','packages','interactions','projects',
     'design_tasks','task_proofs','task_comments','time_logs','queries','query_replies','content_posts','approval_links',
-    'quotations','invoices','payments','expenses','notifications','activity_log'] loop
+    'quotations','invoices','payments','expenses','notifications','activity_log',
+    'suppliers','supplier_bills','supplier_bill_allocations','supplier_payments'] loop
     execute format('alter table public.%I enable row level security', t);
   end loop;
 end $$;
@@ -1056,6 +1192,19 @@ create policy p_pay_rw   on public.payments for all to authenticated
   using (public.has_role('{admin,finance}')) with check (public.has_role('{admin,finance}'));
 create policy p_exp_rw   on public.expenses for all to authenticated
   using (public.has_role('{admin,finance}')) with check (public.has_role('{admin,finance}'));
+
+-- suppliers & work orders: admin/finance full; marketers can create work orders and see costs; payments admin/finance
+create policy p_sup_read  on public.suppliers for select to authenticated using (public.has_role('{admin,marketer,finance}'));
+create policy p_sup_write on public.suppliers for all to authenticated
+  using (public.has_role('{admin,marketer,finance}')) with check (public.has_role('{admin,marketer,finance}'));
+create policy p_sb_rw  on public.supplier_bills for all to authenticated
+  using (public.has_role('{admin,marketer,finance}')) with check (public.has_role('{admin,marketer,finance}'));
+create policy p_sba_rw on public.supplier_bill_allocations for all to authenticated
+  using (public.has_role('{admin,marketer,finance}')) with check (public.has_role('{admin,marketer,finance}'));
+create policy p_sp_rw  on public.supplier_payments for all to authenticated
+  using (public.has_role('{admin,finance}')) with check (public.has_role('{admin,finance}'));
+create policy p_sp_mkt on public.supplier_payments for select to authenticated using (public.has_role('{marketer}'));
+
 
 -- notifications: own only
 create policy p_notif_read on public.notifications for select to authenticated using (user_id = auth.uid());

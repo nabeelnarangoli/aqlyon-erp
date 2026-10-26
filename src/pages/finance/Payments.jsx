@@ -1,54 +1,122 @@
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Plus, Download, Wallet } from 'lucide-react'
+import { Plus, Download, Wallet, ArrowDownLeft, ArrowUpRight, Scale } from 'lucide-react'
 import { supabase, q } from '../../lib/supabase'
-import { useData } from '../../lib/hooks'
+import { useData, useLocal } from '../../lib/hooks'
 import { PAYMENT_METHODS } from '../../lib/constants'
 import { money, money2, date, monthStart, monthEnd, downloadCSV } from '../../lib/format'
-import { PageHeader, Button, Stat, Select, ClientSelect, Input, Loading, Empty, Badge } from '../../components/ui'
+import { PageHeader, Button, Stat, Select, ClientSelect, Input, Loading, Empty, Badge, Tabs } from '../../components/ui'
 import { PaymentModal } from './Invoices'
+import { WorkOrderView } from './Suppliers'
 
 export default function Payments() {
+  const [tab, setTab] = useLocal('payments.tab', 'ledger')
   const [from, setFrom] = useState(monthStart())
   const [to, setTo] = useState(monthEnd())
   const [method, setMethod] = useState('')
   const [client, setClient] = useState('')
   const [adding, setAdding] = useState(false)
-  const { data, loading, reload } = useData(() => q(supabase.from('payments').select('*, invoices(number), clients(name)').gte('paid_on', from).lte('paid_on', to).order('paid_on', { ascending: false })), [from, to], [])
-  const rows = useMemo(() => data.filter((p) => (!method || p.method === method) && (!client || p.client_id === client)), [data, method, client])
-  const total = rows.reduce((a, p) => a + Number(p.amount), 0)
-  const byMethod = PAYMENT_METHODS.map((m) => ({ m, v: rows.filter((p) => p.method === m).reduce((a, p) => a + Number(p.amount), 0) })).filter((x) => x.v)
+  const [bill, setBill] = useState(null)
+  const { data, loading, reload } = useData(async () => {
+    const [inc, out, exp] = await Promise.all([
+      q(supabase.from('payments').select('*, invoices(number), clients(name)').gte('paid_on', from).lte('paid_on', to).order('paid_on', { ascending: false })),
+      q(supabase.from('supplier_payments').select('*, suppliers(name), supplier_bills(id,number,title, supplier_bill_allocations(client_id, amount, clients(name)))').gte('paid_on', from).lte('paid_on', to).order('paid_on', { ascending: false })),
+      q(supabase.from('expenses').select('*, clients(name)').gte('spent_on', from).lte('spent_on', to).order('spent_on', { ascending: false }))
+    ])
+    return { inc, out, exp }
+  }, [from, to], { inc: [], out: [], exp: [] })
+
+  const custOf = (p) => (p.supplier_bills?.supplier_bill_allocations || []).map((a) => a.clients?.name).filter(Boolean).join(', ')
+  const inc = useMemo(() => data.inc.filter((p) => (!method || p.method === method) && (!client || p.client_id === client)), [data.inc, method, client])
+  const out = useMemo(() => data.out.filter((p) => (!method || p.method === method) && (!client || (p.supplier_bills?.supplier_bill_allocations || []).some((a) => a.client_id === client))), [data.out, method, client])
+  const exp = useMemo(() => data.exp.filter((e) => (!method || e.method === method) && (!client || e.client_id === client)), [data.exp, method, client])
+  const tIn = inc.reduce((a, p) => a + Number(p.amount), 0)
+  const tSup = out.reduce((a, p) => a + Number(p.amount), 0)
+  const tExp = exp.reduce((a, e) => a + Number(e.amount), 0)
+
+  const ledger = useMemo(() => {
+    const rows = [
+      ...inc.map((p) => ({ id: p.id, d: p.paid_on, dir: 'in', kind: 'Customer payment', who: p.clients?.name, ref: p.invoices?.number, refLink: p.invoice_id && `/finance/invoices/${p.invoice_id}`, method: p.method, note: p.reference, amt: Number(p.amount) })),
+      ...out.map((p) => ({ id: p.id, d: p.paid_on, dir: 'out', kind: `Supplier · ${p.kind}`, who: p.suppliers?.name, forWho: custOf(p), ref: p.supplier_bills?.number, bill: p.supplier_bills?.id, method: p.method, note: p.reference, amt: Number(p.amount) })),
+      ...exp.map((e) => ({ id: e.id, d: e.spent_on, dir: 'out', kind: `Expense · ${e.category}`, who: e.vendor, forWho: e.clients?.name, method: e.method, note: e.description, amt: Number(e.amount) }))
+    ].sort((a, b) => a.d.localeCompare(b.d) || (a.dir === 'in' ? -1 : 1))
+    let bal = 0
+    return rows.map((r) => ({ ...r, bal: (bal += r.dir === 'in' ? r.amt : -r.amt) })).reverse()
+  }, [inc, out, exp])
+
+  const csv = () => downloadCSV(`cash-flow-${from}-to-${to}.csv`, [...ledger].reverse().map((r) => ({ date: r.d, type: r.kind, party: r.who, for_customer: r.forWho || '', reference: r.ref || '', method: r.method, money_in: r.dir === 'in' ? r.amt : '', money_out: r.dir === 'out' ? r.amt : '', running_balance: r.bal })))
+
   return (
     <>
-      <PageHeader title="Payments received" subtitle="Every rupee collected, by client and method."
+      <PageHeader title="Payments & cash flow" subtitle="Money received from customers and paid to suppliers, side by side."
         actions={<>
-          <Button variant="outline" icon={Download} onClick={() => downloadCSV(`payments-${from}-to-${to}.csv`, rows.map((p) => ({ date: p.paid_on, client: p.clients?.name, invoice: p.invoices?.number, amount: p.amount, method: p.method, reference: p.reference, note: p.note })))}>Export</Button>
-          <Button icon={Plus} onClick={() => setAdding(true)}>Record payment</Button>
+          <Button variant="outline" icon={Download} onClick={csv}>Export</Button>
+          <Link className="btn btn-outline" to="/finance/work-orders"><ArrowUpRight size={16} />Pay a supplier</Link>
+          <Button icon={Plus} onClick={() => setAdding(true)}>Record customer payment</Button>
         </>} />
       <div className="filters">
         <Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} style={{ width: 160 }} />
         <span className="muted">to</span>
         <Input type="date" value={to} onChange={(e) => setTo(e.target.value)} style={{ width: 160 }} />
-        <ClientSelect value={client} onChange={(v) => setClient(v || '')} placeholder="All clients" includeInactive />
+        <ClientSelect value={client} onChange={(v) => setClient(v || '')} placeholder="All customers" includeInactive />
         <Select options={PAYMENT_METHODS} value={method} onChange={(v) => setMethod(v || '')} placeholder="All methods" />
       </div>
       <div className="stats">
-        <Stat label="Collected in period" value={money(total)} sub={`${rows.length} payments`} icon={Wallet} />
-        {byMethod.slice(0, 3).map((x) => <Stat key={x.m} label={x.m} value={money(x.v)} icon={Wallet} tone="teal" />)}
+        <Stat label="Money in" value={money(tIn)} sub={`${inc.length} customer payments`} icon={ArrowDownLeft} onClick={() => setTab('in')} />
+        <Stat label="Paid to suppliers" value={money(tSup)} sub={`${out.length} payments`} icon={ArrowUpRight} tone="orange" onClick={() => setTab('out')} />
+        <Stat label="Other expenses" value={money(tExp)} sub={`${exp.length} entries`} icon={Wallet} tone="red" />
+        <Stat label="Net cash flow" value={money(tIn - tSup - tExp)} icon={Scale} tone={tIn - tSup - tExp >= 0 ? 'teal' : 'red'} onClick={() => setTab('ledger')} />
       </div>
-      {loading ? <Loading /> : rows.length === 0 ? <Empty icon={Wallet} title="No payments in this period" /> : (
-        <div className="card table-wrap"><table className="table">
-          <thead><tr><th>Date</th><th>Client</th><th>Invoice</th><th>Method</th><th>Reference</th><th className="num">Amount</th></tr></thead>
-          <tbody>{rows.map((p) => (
-            <tr key={p.id}>
-              <td className="nowrap">{date(p.paid_on)}</td><td className="cell-title">{p.clients?.name || '—'}</td>
-              <td>{p.invoice_id ? <Link to={`/finance/invoices/${p.invoice_id}`}>{p.invoices?.number}</Link> : <Badge tone="amber">On account</Badge>}</td>
-              <td>{p.method}</td><td className="small muted">{p.reference || p.note || '—'}</td><td className="num strong">{money2(p.amount)}</td>
-            </tr>))}</tbody>
-          <tfoot><tr><td colSpan={5}>Total</td><td className="num">{money2(total)}</td></tr></tfoot>
-        </table></div>
+      <Tabs value={tab} onChange={setTab} tabs={[{ id: 'ledger', label: 'All movements', count: ledger.length }, { id: 'in', label: 'Received from customers', count: inc.length }, { id: 'out', label: 'Paid to suppliers', count: out.length }]} />
+      {loading ? <Loading /> : tab === 'ledger' ? (
+        ledger.length === 0 ? <Empty icon={Wallet} title="No money movements in this period" /> : (
+          <div className="card table-wrap"><table className="table">
+            <thead><tr><th>Date</th><th>Movement</th><th>Party</th><th>For customer</th><th>Ref</th><th className="num">In</th><th className="num">Out</th><th className="num">Balance</th></tr></thead>
+            <tbody>{ledger.map((r) => (
+              <tr key={r.dir + r.id} className={r.bill ? 'click' : ''} onClick={() => r.bill && setBill(r.bill)}>
+                <td className="nowrap">{date(r.d)}</td>
+                <td><Badge tone={r.dir === 'in' ? 'green' : r.kind.startsWith('Supplier') ? 'orange' : 'slate'}>{r.dir === 'in' ? '↓ In' : '↑ Out'}</Badge> <span className="small">{r.kind}</span></td>
+                <td className="cell-title">{r.who || '—'}</td>
+                <td className="small">{r.dir === 'in' ? r.who : r.forWho || <span className="faint">—</span>}</td>
+                <td className="small">{r.refLink ? <Link to={r.refLink} onClick={(e) => e.stopPropagation()}>{r.ref}</Link> : r.ref || r.note || '—'}</td>
+                <td className="num" style={{ color: 'var(--green-d)' }}>{r.dir === 'in' ? money2(r.amt) : ''}</td>
+                <td className="num" style={{ color: 'var(--red)' }}>{r.dir === 'out' ? money2(r.amt) : ''}</td>
+                <td className="num strong">{money2(r.bal)}</td>
+              </tr>))}</tbody>
+            <tfoot><tr><td colSpan={5}>Total</td><td className="num">{money2(tIn)}</td><td className="num">{money2(tSup + tExp)}</td><td className="num">{money2(tIn - tSup - tExp)}</td></tr></tfoot>
+          </table></div>
+        )
+      ) : tab === 'in' ? (
+        inc.length === 0 ? <Empty icon={Wallet} title="No customer payments in this period" /> : (
+          <div className="card table-wrap"><table className="table">
+            <thead><tr><th>Date</th><th>Customer</th><th>Invoice</th><th>Method</th><th>Reference</th><th className="num">Amount</th></tr></thead>
+            <tbody>{inc.map((p) => (
+              <tr key={p.id}>
+                <td className="nowrap">{date(p.paid_on)}</td><td className="cell-title">{p.clients?.name || '—'}</td>
+                <td>{p.invoice_id ? <Link to={`/finance/invoices/${p.invoice_id}`}>{p.invoices?.number}</Link> : <Badge tone="amber">On account</Badge>}</td>
+                <td>{p.method}</td><td className="small muted">{p.reference || p.note || '—'}</td><td className="num strong">{money2(p.amount)}</td>
+              </tr>))}</tbody>
+            <tfoot><tr><td colSpan={5}>Total</td><td className="num">{money2(tIn)}</td></tr></tfoot>
+          </table></div>
+        )
+      ) : (
+        out.length === 0 ? <Empty icon={Wallet} title="No supplier payments in this period">Open a supplier work order and press “Pay supplier”.</Empty> : (
+          <div className="card table-wrap"><table className="table">
+            <thead><tr><th>Date</th><th>Supplier</th><th>Work order</th><th>For customer</th><th>Type</th><th>Method</th><th className="num">Amount</th></tr></thead>
+            <tbody>{out.map((p) => (
+              <tr key={p.id} className="click" onClick={() => p.supplier_bills?.id && setBill(p.supplier_bills.id)}>
+                <td className="nowrap">{date(p.paid_on)}</td><td className="cell-title">{p.suppliers?.name}</td>
+                <td><div>{p.supplier_bills?.title}</div><div className="cell-sub">{p.supplier_bills?.number}</div></td>
+                <td className="small">{custOf(p) || <span className="faint">Internal</span>}</td>
+                <td><Badge tone={p.kind === 'final' ? 'green' : 'blue'}>{p.kind}</Badge></td><td>{p.method}{p.reference && <div className="cell-sub">{p.reference}</div>}</td>
+                <td className="num strong">{money2(p.amount)}</td>
+              </tr>))}</tbody>
+            <tfoot><tr><td colSpan={6}>Total</td><td className="num">{money2(tSup)}</td></tr></tfoot>
+          </table></div>
+        )
       )}
       {adding && <PaymentModal onClose={() => setAdding(false)} onSaved={() => { setAdding(false); reload() }} />}
+      {bill && <WorkOrderView id={bill} onClose={() => { setBill(null); reload() }} />}
     </>
   )
 }

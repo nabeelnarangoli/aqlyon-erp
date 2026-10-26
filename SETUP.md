@@ -74,6 +74,7 @@ git push -u origin main staging
 | Quotations | Full | Full | — | Full |
 | Invoices | Full | View | — | Full |
 | Payments & expenses | Full | — | — | Full |
+| Suppliers & work orders | Full | Create, assign to customers | — | Full + pay suppliers |
 | Team queries | All | Own + team inbox | Own + team inbox | Own + team inbox |
 | Reports | All | Sales, team, content, clients | Own productivity | P&L, receivables, clients |
 | Team & settings | ✓ | — | — | — |
@@ -100,6 +101,14 @@ Marketer: Mark delivered
 3. **Record payment** as money arrives (UPI/bank/cash; part-payments supported).
 4. **Expenses → Copy recurring** to bring rent, salaries and subscriptions forward, then add the rest.
 5. **Reports → Profit & Loss / Receivables / Client profitability**.
+
+## Outsourced work (suppliers)
+
+1. **Supplier work orders → New work order**: pick the supplier (freelancer, printer, videographer…), what you’re paying for, and **which customer(s)** it’s for — optionally against a specific invoice. One order can be split across several customers.
+2. **Pay supplier** on the work order for each advance / part / final payment (Finance or Admin).
+3. Mark **Work received** when the supplier delivers.
+4. Every invoice shows a **Money flow for this job** card: billed, received, supplier cost (paid / still to pay) and your margin, with a dated in/out timeline.
+5. **Payments & cash flow** lists all money in and out with a running balance; P&L and client profitability include supplier costs.
 
 ## Updating the database later
 

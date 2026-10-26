@@ -4,7 +4,7 @@ import {
   ArrowLeft, Pencil, Phone, MessageCircle, Mail, Globe, Camera, ThumbsUp, Plus, Link2, Copy, Ban, Palette, CalendarDays,
   FileText, Package, Trash2, ExternalLink, Megaphone
 } from 'lucide-react'
-import { supabase, q } from '../../lib/supabase'
+import { supabase, q, appLink, DEMO } from '../../lib/supabase'
 import { useData } from '../../lib/hooks'
 import { useAuth } from '../../lib/auth'
 import { CLIENT_STATUS, TASK_STATUSES, INVOICE_STATUS, BILLING_TYPES, PLATFORMS, PROJECT_STATUS, byId } from '../../lib/constants'
@@ -17,6 +17,7 @@ import Interactions from '../../components/Interactions'
 import { ClientModal, monthly } from './Clients'
 import { TaskModal } from '../tasks/TaskForm'
 import { ProjectModal } from './Projects'
+import { MoneyFlow } from '../finance/Suppliers'
 
 export default function ClientDetail() {
   const { id } = useParams()
@@ -33,7 +34,7 @@ export default function ClientDetail() {
     can('marketer', 'designer') && { id: 'tasks', label: 'Design tasks' },
     can('marketer', 'designer') && { id: 'projects', label: 'Campaigns' },
     can('marketer', 'finance') && { id: 'packages', label: 'Packages' },
-    can('marketer', 'finance') && { id: 'invoices', label: 'Invoices' },
+    can('marketer', 'finance') && { id: 'invoices', label: 'Invoices & money flow' },
     can('marketer') && { id: 'links', label: 'Client approval links' }
   ].filter(Boolean)
 
@@ -57,7 +58,7 @@ export default function ClientDetail() {
       {tab === 'tasks' && <ClientTasks clientId={c.id} />}
       {tab === 'projects' && <ClientProjects clientId={c.id} />}
       {tab === 'packages' && <Packages clientId={c.id} />}
-      {tab === 'invoices' && <ClientInvoices clientId={c.id} />}
+      {tab === 'invoices' && <><ClientInvoices clientId={c.id} /><div className="mt"><MoneyFlow clientId={c.id} /></div></>}
       {tab === 'links' && <ApprovalLinks client={c} />}
       {editing && <ClientModal client={c} onClose={() => setEditing(false)} onSaved={() => { setEditing(false); reload() }} />}
     </>
@@ -302,10 +303,11 @@ function ClientInvoices({ clientId }) {
 }
 
 function ApprovalLinks({ client }) {
+  const nav = useNavigate()
   const { toast } = useToast()
   const [busy, run] = useAction()
   const { data, loading, reload } = useData(() => q(supabase.from('approval_links').select('*').eq('client_id', client.id).order('created_at', { ascending: false })), [client.id], [])
-  const url = (t) => `${window.location.origin}/p/${t}`
+  const url = (t) => appLink(`/p/${t}`)
   const create = () => run(async () => {
     const row = await q(supabase.from('approval_links').insert({ client_id: client.id, label: `Approval link · ${new Date().toLocaleDateString('en-IN')}`, expires_at: new Date(Date.now() + 60 * 86400000).toISOString() }).select().single())
     await navigator.clipboard?.writeText(url(row.token)).catch(() => {})
@@ -322,6 +324,7 @@ function ApprovalLinks({ client }) {
           {active.map((l) => (
             <div key={l.token} className="list-item">
               <div className="grow"><div className="cell-title ellipsis">{url(l.token)}</div><div className="cell-sub">Expires {date(l.expires_at)}</div></div>
+              {DEMO && <Button size="sm" variant="dark" icon={ExternalLink} onClick={() => nav(`/p/${l.token}`)}>Preview as client</Button>}
               <Button size="sm" variant="outline" icon={Copy} onClick={() => copy(l.token)}>Copy</Button>
               <a className="btn btn-sm btn-soft" target="_blank" rel="noreferrer" href={waLink(client.whatsapp || client.phone, `Hi ${client.contact_person || ''}, please review and approve your upcoming content here: ${url(l.token)}`)}><MessageCircle size={14} />Send</a>
               <IconBtn icon={Ban} title="Revoke" onClick={() => revoke(l)} />

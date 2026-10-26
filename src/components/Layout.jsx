@@ -2,10 +2,11 @@ import { useEffect, useRef, useState } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import {
   LayoutDashboard, Target, Building2, PhoneCall, Megaphone, Palette, CalendarDays, MessagesSquare,
-  FileText, FileSignature, Wallet, Receipt, BarChart3, Users, Settings, LogOut, Bell, Menu, Clock, CheckCheck
+  FileText, FileSignature, Wallet, Receipt, BarChart3, Users, Settings, LogOut, Bell, Menu, Clock, CheckCheck, Truck, Store
 } from 'lucide-react'
 import { useAuth } from '../lib/auth'
-import { supabase, q } from '../lib/supabase'
+import { supabase, q, DEMO } from '../lib/supabase'
+import { resetDemo } from '../lib/demo'
 import { useData, useRealtime, useDebounced } from '../lib/hooks'
 import { ROLES } from '../lib/constants'
 import { ago } from '../lib/format'
@@ -30,7 +31,9 @@ const NAV = [
   { group: 'Finance', items: [
     { to: '/finance/quotations', label: 'Quotations', icon: FileSignature, roles: ['marketer', 'finance'] },
     { to: '/finance/invoices', label: 'Invoices', icon: FileText, roles: ['finance', 'marketer'] },
-    { to: '/finance/payments', label: 'Payments', icon: Wallet, roles: ['finance'] },
+    { to: '/finance/payments', label: 'Payments & cash flow', icon: Wallet, roles: ['finance'] },
+    { to: '/finance/work-orders', label: 'Supplier work orders', icon: Truck, roles: ['finance', 'marketer'] },
+    { to: '/finance/suppliers', label: 'Suppliers', icon: Store, roles: ['finance', 'marketer'] },
     { to: '/finance/expenses', label: 'Expenses', icon: Receipt, roles: ['finance'] }
   ] },
   { group: 'Insights', items: [
@@ -97,6 +100,7 @@ export default function Layout() {
           <IconBtn className="menu-btn" icon={Menu} title="Menu" onClick={() => setOpen(true)} />
           <GlobalSearch />
           <div className="grow" />
+          {DEMO && <DemoBar />}
           <Notifications />
         </header>
         <main className="content"><Outlet /></main>
@@ -189,6 +193,19 @@ function Notifications() {
           ))}
         </div>
       )}
+    </div>
+  )
+}
+
+function DemoBar() {
+  const { signOut } = useAuth()
+  const [ask, setAsk] = useState(false)
+  return (
+    <div className="row gap-s hide-sm" style={{ fontSize: 12.5 }}>
+      <Badge tone="amber">Demo · sample data</Badge>
+      {ask
+        ? <><span className="muted">Reset all demo data?</span><button className="btn btn-sm btn-danger" onClick={() => { resetDemo(); window.location.reload() }}>Reset</button><button className="btn btn-sm btn-ghost" onClick={() => setAsk(false)}>Cancel</button></>
+        : <><button className="btn btn-sm btn-ghost" onClick={() => setAsk(true)}>Reset data</button><button className="btn btn-sm btn-outline" onClick={signOut}>Switch role</button></>}
     </div>
   )
 }

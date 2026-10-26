@@ -102,6 +102,25 @@ do $$ begin begin update profiles set role='admin' where id=auth.uid();
   exception when insufficient_privilege then null; end;
   raise notice 'ok: designer cannot self-promote'; end $$;
 reset role;
+-- ===== SUPPLIER COSTS: logo outsourced for 5K, paid 3K + 2K, allocated to client invoice
+select pg_temp.as_user('00000000-0000-0000-0000-00000000000b');
+insert into suppliers(id,name,category) values ('40000000-0000-0000-0000-000000000001','Pixel Studio','Freelance Designer');
+insert into supplier_bills(id,supplier_id,title,items) values ('50000000-0000-0000-0000-000000000001','40000000-0000-0000-0000-000000000001','Logo design','[{"description":"Logo concepts","qty":1,"rate":5000}]');
+insert into supplier_bill_allocations(bill_id,client_id,invoice_id,amount) select '50000000-0000-0000-0000-000000000001', client_id, id, 5000 from invoices limit 1;
+do $$ begin begin insert into supplier_payments(bill_id,amount) values ('50000000-0000-0000-0000-000000000001',3000); raise exception 'FAIL marketer paid supplier';
+  exception when insufficient_privilege then raise notice 'ok: marketer cannot pay suppliers'; end; end $$;
+reset role;
+select pg_temp.as_user('00000000-0000-0000-0000-00000000000d');
+insert into supplier_payments(bill_id,amount,kind) values ('50000000-0000-0000-0000-000000000001',3000,'advance');
+select 'supplier partial' t, number, total, amount_paid, status from supplier_bills;
+insert into supplier_payments(bill_id,amount,kind) values ('50000000-0000-0000-0000-000000000001',2000,'final');
+select 'supplier paid' t, amount_paid, status from supplier_bills;
+select direction, kind, amount from v_money_movements order by direction, kind;
+reset role;
+select pg_temp.as_user('00000000-0000-0000-0000-00000000000c');
+select 'designer sees supplier bills' t, count(*) from supplier_bills;
+reset role;
+
 -- self-signup with a forged role must NOT get access
 insert into auth.users(id,email,raw_user_meta_data) values ('00000000-0000-0000-0000-0000000000ff','hacker@x.test','{"role":"admin"}');
 do $$ begin
