@@ -15,7 +15,7 @@ import { TaskModal } from './TaskForm'
 const DOW = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 
 export default function Calendar() {
-  const { can } = useAuth()
+  const { has } = useAuth()
   const { toast } = useToast()
   const [params, setParams] = useSearchParams()
   const [client, setClient] = useLocal('cal.client', '')
@@ -24,7 +24,7 @@ export default function Calendar() {
   const [editing, setEditing] = useState(null)
   const [over, setOver] = useState(null)
   const [busy, run] = useAction()
-  const isMgr = can('marketer')
+  const isMgr = has('calendar.manage')
 
   useEffect(() => { const c = params.get('client'); if (c) { setClient(c); setParams({}, { replace: true }) } }, [params, setParams, setClient])
 

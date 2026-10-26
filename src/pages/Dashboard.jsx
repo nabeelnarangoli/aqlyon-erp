@@ -7,13 +7,13 @@ import {
 import { supabase, q } from '../lib/supabase'
 import { useData } from '../lib/hooks'
 import { useAuth } from '../lib/auth'
-import { TASK_STATUSES, LEAD_STAGES, POST_STATUSES, ROLES } from '../lib/constants'
+import { TASK_STATUSES, LEAD_STAGES, POST_STATUSES } from '../lib/constants'
 import { money, compact, date, dueLabel, daysFrom, monthStart, monthEnd, todayISO, addDays, hours, pct, toISO } from '../lib/format'
 import { Stat, Card, Badge, StatusBadge, Member, Loading, Empty, Button, Progress, Avatar } from '../components/ui'
 import { monthly } from './crm/Clients'
 
 export default function Dashboard() {
-  const { profile, role, can } = useAuth()
+  const { profile, role, has, isAdmin } = useAuth()
   const nav = useNavigate()
   const hour = new Date().getHours()
   const greet = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening'
@@ -23,19 +23,23 @@ export default function Dashboard() {
         <div>
           <p className="small" style={{ color: 'var(--green-2)', fontWeight: 700, letterSpacing: '.08em', textTransform: 'uppercase' }}>{new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long' })}</p>
           <h1>{greet}, {profile.full_name.split(' ')[0]}</h1>
-          <p>{ROLES[role].label} · Aqlyon Brand Management</p>
+          <p>{role?.name || 'Team member'} · Aqlyon Brand Management</p>
         </div>
         <div className="row gap-s wrap" style={{ position: 'relative', zIndex: 1 }}>
-          {can('marketer') && <Button variant="primary" icon={Plus} onClick={() => nav('/leads')}>Lead</Button>}
-          {can('marketer') && <Button variant="outline" icon={Palette} onClick={() => nav('/tasks')}>Design task</Button>}
-          {role === 'designer' && <Button icon={Palette} onClick={() => nav('/tasks')}>My tasks</Button>}
-          {can('finance') && <Button variant="outline" icon={FileText} onClick={() => nav('/finance/invoices?new=1')}>Invoice</Button>}
+          {has('leads.manage') && <Button variant="primary" icon={Plus} onClick={() => nav('/leads')}>Lead</Button>}
+          {has('tasks.manage') && <Button variant="outline" icon={Palette} onClick={() => nav('/tasks')}>Design task</Button>}
+          {has('tasks.work') && !has('tasks.manage') && <Button icon={Palette} onClick={() => nav('/tasks')}>My tasks</Button>}
+          {has('invoices.manage') && <Button variant="outline" icon={FileText} onClick={() => nav('/finance/invoices?new=1')}>Invoice</Button>}
         </div>
       </div>
-      {role === 'admin' && <AdminDash />}
-      {role === 'marketer' && <MarketerDash />}
-      {role === 'designer' && <DesignerDash />}
-      {role === 'finance' && <FinanceDash />}
+      {isAdmin ? <AdminDash /> : <>
+        {has('leads.manage', 'tasks.manage', 'tasks.review') && <MarketerDash />}
+        {has('tasks.work') && !has('tasks.manage') && <DesignerDash />}
+        {has('invoices.manage', 'payments.manage') && <FinanceDash />}
+        {!has('leads.manage', 'tasks.manage', 'tasks.review', 'tasks.work', 'invoices.manage', 'payments.manage') && (
+          <Card><p className="muted">Use the menu on the left to open the areas your role gives you access to.</p></Card>
+        )}
+      </>}
     </>
   )
 }
@@ -139,7 +143,7 @@ function useOps() {
 function AdminDash() {
   const fin = useFinance()
   const ops = useOps()
-  const { team } = useAuth()
+  const { workers } = useAuth()
   const nav = useNavigate()
   if (!fin.data || !ops.data) return <Loading />
   const o = ops.data
@@ -147,7 +151,7 @@ function AdminDash() {
   const pipe = o.leads.filter((l) => !['won', 'lost'].includes(l.stage))
   const overdue = o.tasks.filter((t) => !['approved'].includes(t.status) && t.due_date && daysFrom(t.due_date) < 0)
   const review = o.tasks.filter((t) => t.status === 'internal_review')
-  const designers = team.filter((m) => m.active && m.role === 'designer')
+  const designers = workers
   return (
     <>
       <div className="stats">

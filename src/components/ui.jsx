@@ -147,9 +147,9 @@ export function Chips({ options, value = [], onChange }) {
     </div>
   )
 }
-export function MemberSelect({ value, onChange, roles, placeholder = 'Unassigned' }) {
-  const { team } = useAuth()
-  const opts = team.filter((m) => m.active && (!roles || roles.includes(m.role))).map((m) => ({ id: m.id, label: m.full_name }))
+export function MemberSelect({ value, onChange, perm, placeholder = 'Unassigned' }) {
+  const { team, memberHas } = useAuth()
+  const opts = team.filter((m) => m.active && (!perm || memberHas(m, ...perm) || m.id === value)).map((m) => ({ id: m.id, label: m.full_name }))
   return <Select options={opts} value={value} onChange={onChange} placeholder={placeholder} />
 }
 

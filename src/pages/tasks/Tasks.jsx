@@ -14,11 +14,11 @@ import { TaskModal } from './TaskForm'
 const BOARD_COLS = ['todo', 'in_progress', 'internal_review', 'client_review', 'revision', 'approved', 'delivered']
 
 export default function Tasks() {
-  const { user, role, can } = useAuth()
+  const { user, has } = useAuth()
   const nav = useNavigate()
   const { toast } = useToast()
   const [view, setView] = useLocal('tasks.view', 'board')
-  const [scope, setScope] = useLocal('tasks.scope', role === 'designer' ? 'mine' : 'all')
+  const [scope, setScope] = useLocal('tasks.scope', has('tasks.manage', 'tasks.review') ? 'all' : 'mine')
   const [client, setClient] = useState('')
   const [designer, setDesigner] = useState('')
   const [type, setType] = useState('')
@@ -47,7 +47,7 @@ export default function Tasks() {
   const move = async (id, status) => {
     const t = data.find((x) => x.id === id)
     if (!t || t.status === status) return
-    if (role === 'designer' && !DESIGNER_STATUSES.includes(status)) { toast('Designers can move tasks to To do, In progress or Internal review. Upload a proof to send for review.', 'info'); return }
+    if (!has('tasks.manage', 'tasks.review') && !DESIGNER_STATUSES.includes(status)) { toast('You can move tasks to To do, In progress or Internal review. Upload a proof to send for review.', 'info'); return }
     setData((d) => d.map((x) => (x.id === id ? { ...x, status } : x)))
     const { error } = await supabase.from('design_tasks').update({ status }).eq('id', id)
     if (error) { toast(error.message, 'error'); reload() }
@@ -56,7 +56,7 @@ export default function Tasks() {
   const overdue = rows.filter((t) => !['approved', 'delivered', 'cancelled'].includes(t.status) && t.due_date && dueLabel(t.due_date).tone === 'red').length
   const scopes = [
     { id: 'all', label: 'All tasks' }, { id: 'mine', label: 'Assigned to me' },
-    can('marketer') && { id: 'created', label: 'Created by me' }, can('marketer') && { id: 'review', label: 'Needs review' },
+    has('tasks.manage') && { id: 'created', label: 'Created by me' }, has('tasks.review') && { id: 'review', label: 'Needs review' },
     { id: 'unassigned', label: 'Unassigned' }
   ].filter(Boolean)
 
@@ -65,13 +65,13 @@ export default function Tasks() {
       <PageHeader title="Design Tasks" subtitle={`${rows.filter((t) => !['delivered', 'cancelled'].includes(t.status)).length} in production${overdue ? ` · ${overdue} overdue` : ''}`}
         actions={<>
           <Button variant="outline" icon={Download} onClick={() => downloadCSV('design-tasks.csv', rows.map((t) => ({ code: t.code, title: t.title, client: t.clients?.name, type: t.task_type, qty: t.quantity, status: t.status, priority: t.priority, due: t.due_date, revisions: t.revision_count })))}>Export</Button>
-          {can('marketer') && <Button icon={Plus} onClick={() => setAdding(true)}>New task</Button>}
+          {has('tasks.manage') && <Button icon={Plus} onClick={() => setAdding(true)}>New task</Button>}
         </>} />
       <div className="filters">
         <div className="seg">{scopes.map((s) => <button key={s.id} className={cx(scope === s.id && 'on')} onClick={() => setScope(s.id)}>{s.label}</button>)}</div>
         <SearchInput value={search} onChange={setSearch} placeholder="Search tasks…" />
         <ClientSelect value={client} onChange={(v) => setClient(v || '')} placeholder="All clients" />
-        {role !== 'designer' && <MemberSelect roles={['designer', 'admin']} value={designer} onChange={(v) => setDesigner(v || '')} placeholder="All designers" />}
+        {has('tasks.view', 'tasks.manage') && <MemberSelect perm={['tasks.work']} value={designer} onChange={(v) => setDesigner(v || '')} placeholder="All designers" />}
         <Select options={TASK_TYPES} value={type} onChange={(v) => setType(v || '')} placeholder="All types" />
         <div className="grow" />
         {view === 'list' && <label className="check small"><input type="checkbox" checked={showDone} onChange={(e) => setShowDone(e.target.checked)} />Show delivered</label>}

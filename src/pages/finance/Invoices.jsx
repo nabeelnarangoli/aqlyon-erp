@@ -13,7 +13,7 @@ import {
 import DocEditor from './DocEditor'
 
 export default function Invoices() {
-  const { can } = useAuth()
+  const { has } = useAuth()
   const nav = useNavigate()
   const { confirm, toast } = useToast()
   const [params, setParams] = useSearchParams()
@@ -24,7 +24,7 @@ export default function Invoices() {
   const [paying, setPaying] = useState(null)
   const [busy, run] = useAction()
   const { data, loading, reload } = useData(() => q(supabase.from('v_invoice_status').select('*').order('issue_date', { ascending: false }).limit(2000)), [], [])
-  const isFin = can('finance')
+  const isFin = has('invoices.manage')
 
   useEffect(() => {
     if (params.get('new')) { setEditing({ client_id: params.get('client') || '' }); setParams({}, { replace: true }) }

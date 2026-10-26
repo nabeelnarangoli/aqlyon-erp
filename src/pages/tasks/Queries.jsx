@@ -4,7 +4,7 @@ import { Plus, Send, CheckCircle2, RotateCcw, MessagesSquare, ArrowLeft } from '
 import { supabase, q } from '../../lib/supabase'
 import { useData, useRealtime } from '../../lib/hooks'
 import { useAuth } from '../../lib/auth'
-import { QUERY_STATUS, PRIORITIES, ROLES } from '../../lib/constants'
+import { QUERY_STATUS, PRIORITIES } from '../../lib/constants'
 import { ago, dateTime } from '../../lib/format'
 import { PageHeader, Button, Badge, StatusBadge, Member, Avatar, Card, Textarea, Loading, Empty, SearchInput, useAction, cx } from '../../components/ui'
 import { AskQuery } from './TaskDetail'
@@ -12,7 +12,7 @@ import { AskQuery } from './TaskDetail'
 export default function Queries() {
   const { id } = useParams()
   const nav = useNavigate()
-  const { user, role, isAdmin } = useAuth()
+  const { user, profile, isAdmin } = useAuth()
   const [box, setBox] = useState('inbox')
   const [status, setStatus] = useState('active')
   const [search, setSearch] = useState('')
@@ -21,14 +21,14 @@ export default function Queries() {
   useRealtime('query_replies', null, () => list.reload())
 
   const rows = useMemo(() => list.data.filter((x) => {
-    if (box === 'inbox' && !(x.to_user === user.id || (x.to_role === role && x.from_user !== user.id))) return false
+    if (box === 'inbox' && !(x.to_user === user.id || (x.to_role_id && x.to_role_id === profile.role_id && x.from_user !== user.id))) return false
     if (box === 'sent' && x.from_user !== user.id) return false
     if (status === 'active' && x.status === 'resolved') return false
     if (status === 'resolved' && x.status !== 'resolved') return false
     if (search && ![x.subject, x.body, x.clients?.name].some((v) => v?.toLowerCase().includes(search.toLowerCase()))) return false
     return true
-  }), [list.data, box, status, search, user.id, role])
-  const inboxOpen = list.data.filter((x) => (x.to_user === user.id || (x.to_role === role && x.from_user !== user.id)) && x.status === 'open').length
+  }), [list.data, box, status, search, user.id, profile.role_id])
+  const inboxOpen = list.data.filter((x) => (x.to_user === user.id || (x.to_role_id && x.to_role_id === profile.role_id && x.from_user !== user.id)) && x.status === 'open').length
 
   return (
     <>
@@ -78,7 +78,7 @@ export default function Queries() {
 
 function Thread({ id, onChanged }) {
   const nav = useNavigate()
-  const { user, member } = useAuth()
+  const { user, member, roleOf } = useAuth()
   const [text, setText] = useState('')
   const [busy, run] = useAction()
   const qd = useData(() => q(supabase.from('queries').select('*, clients(id,name), design_tasks(id,code,title)').eq('id', id).single()), [id])
@@ -96,7 +96,7 @@ function Thread({ id, onChanged }) {
     setText(''); replies.reload(); qd.reload(); onChanged()
   }, resolve ? 'Marked resolved' : null)
   const reopen = () => run(async () => { await q(supabase.from('queries').update({ status: 'open', resolved_at: null }).eq('id', id)); qd.reload(); onChanged() })
-  const to = x.to_user ? member(x.to_user)?.full_name : x.to_role ? `${ROLES[x.to_role]?.label} team` : '—'
+  const to = x.to_user ? member(x.to_user)?.full_name : x.to_role_id ? `everyone in ${roleOf(x.to_role_id)?.name || 'a role'}` : '—'
 
   return (
     <Card title={<span className="row gap-s"><button className="icon-btn only-sm" onClick={() => nav('/queries')}><ArrowLeft size={16} /></button>{x.subject}</span>}

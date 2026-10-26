@@ -18,7 +18,7 @@ import { TaskModal } from './TaskForm'
 export default function TaskDetail() {
   const { id } = useParams()
   const nav = useNavigate()
-  const { user, role, can } = useAuth()
+  const { user, has } = useAuth()
   const { confirm } = useToast()
   const [editing, setEditing] = useState(false)
   const [reviewing, setReviewing] = useState(null) // { proof, decision }
@@ -38,7 +38,7 @@ export default function TaskDetail() {
   const t = task.data
   const c = t.clients
   const mine = t.assignee_id === user.id
-  const isMgr = can('marketer')
+  const isMgr = has('tasks.manage', 'tasks.review')
   const closed = ['delivered', 'cancelled'].includes(t.status)
   const latest = proofs.data[0]
 
@@ -62,7 +62,7 @@ export default function TaskDetail() {
           <p className="muted">{c ? <Link to={`/clients/${c.id}`}>{c.name}</Link> : 'No client'}{t.projects?.name && <> · {t.projects.name}</>} · {t.task_type}{t.quantity > 1 && ` ×${t.quantity}`} · {t.platform} · {t.size}</p>
         </div>
         <div className="page-actions">
-          {!t.assignee_id && role === 'designer' && <Button icon={Play} onClick={claim} loading={busy}>Pick up this task</Button>}
+          {!t.assignee_id && has('tasks.work') && <Button icon={Play} onClick={claim} loading={busy}>Pick up this task</Button>}
           {(mine || isMgr) && ['todo', 'revision'].includes(t.status) && t.assignee_id && <Button icon={Play} onClick={() => setStatus('in_progress', 'Started')} loading={busy}>Start work</Button>}
           {isMgr && t.status === 'client_review' && <>
             <Button variant="outline" icon={ThumbsDown} onClick={() => setReviewing({ proof: latest, decision: 'client_changes' })}>Client wants changes</Button>
@@ -90,7 +90,7 @@ export default function TaskDetail() {
             {t.reference_links && <><h4 className="mt small muted" style={{ textTransform: 'uppercase', letterSpacing: '.06em' }}>References</h4><Linkify text={t.reference_links} /></>}
           </Card>
 
-          <ProofsSection t={t} proofs={proofs} canUpload={(mine || isMgr || (!t.assignee_id && role === 'designer')) && !closed}
+          <ProofsSection t={t} proofs={proofs} canUpload={(mine || isMgr || (!t.assignee_id && has('tasks.work'))) && !closed}
             canReview={isMgr} onReview={(proof, decision) => setReviewing({ proof, decision })} onChanged={() => { proofs.reload(); task.reload() }} />
 
           <Discussion taskId={id} />
@@ -99,7 +99,7 @@ export default function TaskDetail() {
         <div className="grid" style={{ alignContent: 'start' }}>
           <Card title="Details">
             <dl className="kv">
-              <dt>Designer</dt><dd>{isMgr ? <MemberSelect roles={['designer', 'admin']} value={t.assignee_id} onChange={reassign} /> : <Member id={t.assignee_id} />}</dd>
+              <dt>Designer</dt><dd>{isMgr ? <MemberSelect perm={['tasks.work']} value={t.assignee_id} onChange={reassign} /> : <Member id={t.assignee_id} />}</dd>
               <dt>Requested by</dt><dd><Member id={t.created_by} size={22} /></dd>
               <dt>Due</dt><dd>{t.due_date ? date(t.due_date) : '—'}</dd>
               <dt>Started</dt><dd>{t.start_date ? date(t.start_date) : '—'}</dd>
@@ -114,9 +114,9 @@ export default function TaskDetail() {
               <div className="small muted mb">Linked calendar posts</div>
               {posts.data.map((p) => <Link key={p.id} to={`/calendar?post=${p.id}`} className="row between small" style={{ padding: '4px 0' }}><span>{p.title}</span><span className="faint">{date(p.publish_date)}</span></Link>)}
             </div>}
-            {(mine || isMgr) && !closed && DESIGNER_TRANSITIONS(t, role).length > 0 && (
+            {(mine || isMgr) && !closed && DESIGNER_TRANSITIONS(t, isMgr).length > 0 && (
               <div className="row gap-s wrap mt">
-                {DESIGNER_TRANSITIONS(t, role).map((x) => <Button key={x.to} size="sm" variant="outline" onClick={() => setStatus(x.to, x.msg)}>{x.label}</Button>)}
+                {DESIGNER_TRANSITIONS(t, isMgr).map((x) => <Button key={x.to} size="sm" variant="outline" onClick={() => setStatus(x.to, x.msg)}>{x.label}</Button>)}
               </div>
             )}
             {isMgr && (
@@ -149,10 +149,10 @@ export default function TaskDetail() {
   )
 }
 
-const DESIGNER_TRANSITIONS = (t, role) => {
+const DESIGNER_TRANSITIONS = (t, isMgr) => {
   const out = []
   if (t.status === 'in_progress') out.push({ to: 'todo', label: 'Move back to To do', msg: 'Moved to To do' })
-  if (role !== 'designer' && t.status === 'internal_review') out.push({ to: 'in_progress', label: 'Send back to designer', msg: 'Sent back' })
+  if (isMgr && t.status === 'internal_review') out.push({ to: 'in_progress', label: 'Send back to designer', msg: 'Sent back' })
   return out
 }
 
@@ -376,15 +376,15 @@ function TimeLog({ t, canLog }) {
 /* ------------------------------ Raise query ------------------------------ */
 export function AskQuery({ task, client, onClose, onSaved }) {
   const nav = useNavigate()
-  const { role } = useAuth()
+  const { user, roles } = useAuth()
   const [f, set] = useForm({
     subject: task ? `${task.code}: ` : '', body: '', category: task ? 'Brief clarification' : 'General', priority: 'normal',
-    to_user: task ? (role === 'designer' ? task.created_by : task.assignee_id) || '' : '', to_role: ''
+    to_user: task ? (task.assignee_id === user.id ? task.created_by : task.assignee_id) || '' : '', to_role_id: ''
   })
   const [busy, run] = useAction()
   const submit = (e) => { e.preventDefault(); run(async () => {
     const row = await q(supabase.from('queries').insert({
-      subject: f.subject, body: f.body, category: f.category, priority: f.priority, to_user: f.to_user || null, to_role: f.to_user ? null : f.to_role || null,
+      subject: f.subject, body: f.body, category: f.category, priority: f.priority, to_user: f.to_user || null, to_role_id: f.to_user ? null : f.to_role_id || null,
       task_id: task?.id || null, client_id: task?.client_id || client || null
     }).select().single())
     onSaved?.(row); onClose(); nav(`/queries/${row.id}`)
@@ -395,7 +395,7 @@ export function AskQuery({ task, client, onClose, onSaved }) {
       <form id="ask" className="form" onSubmit={submit}>
         <Field label="Subject" span={2} required><Input required value={f.subject} onChange={set('subject')} /></Field>
         <Field label="Send to person"><MemberSelect value={f.to_user} onChange={set('to_user')} placeholder="— or choose a team —" /></Field>
-        <Field label="…or to a whole team"><Select disabled={!!f.to_user} options={[{ id: 'marketer', label: 'Digital Marketing team' }, { id: 'designer', label: 'Design team' }, { id: 'finance', label: 'Finance' }, { id: 'admin', label: 'Admin' }]} value={f.to_role} onChange={set('to_role')} /></Field>
+        <Field label="…or to a whole team"><Select disabled={!!f.to_user} options={roles.map((r) => ({ id: r.id, label: `Everyone in ${r.name}` }))} value={f.to_role_id} onChange={set('to_role_id')} /></Field>
         <Field label="Category"><Select placeholder={false} options={QUERY_CATEGORIES} value={f.category} onChange={set('category')} /></Field>
         <Field label="Priority"><Select placeholder={false} options={PRIORITIES} value={f.priority} onChange={set('priority')} /></Field>
         <Field label="Details" span={2} required><Textarea rows={5} required value={f.body} onChange={set('body')} /></Field>

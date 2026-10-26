@@ -14,6 +14,27 @@ do $$ begin
   create type app_role as enum ('admin','marketer','designer','finance');
 exception when duplicate_object then null; end $$;
 
+-- Custom roles: the admin builds roles from permissions in Team & Access → Roles.
+create table if not exists public.roles (
+  id          uuid primary key default gen_random_uuid(),
+  key         text unique,                  -- set only for the built-in starting roles
+  name        text not null unique,
+  description text,
+  color       text not null default 'slate',
+  permissions text[] not null default '{}', -- '*' = everything (Administrator)
+  is_system   boolean not null default false,
+  created_at  timestamptz not null default now()
+);
+insert into public.roles (key, name, color, is_system, description, permissions) values
+  ('admin', 'Administrator', 'dark', true, 'Full access to everything', '{*}'),
+  ('marketer', 'Digital Marketer', 'green', false, 'Leads, clients, tasks, calendar and quotations',
+   '{leads.view,leads.manage,clients.view,clients.manage,packages.view,packages.manage,projects.view,projects.manage,tasks.view,tasks.manage,tasks.review,calendar.view,calendar.manage,timesheet.all,quotations.view,quotations.manage,invoices.view,suppliers.view,suppliers.manage,reports.sales,reports.team,reports.content,reports.clients}'),
+  ('designer', 'Graphic Designer', 'violet', false, 'Works on design tasks and uploads proofs',
+   '{clients.view,projects.view,tasks.view,tasks.work,calendar.view}'),
+  ('finance', 'Finance', 'amber', false, 'Invoices, payments, expenses and suppliers',
+   '{clients.view,packages.view,quotations.view,quotations.manage,invoices.view,invoices.manage,payments.manage,expenses.manage,suppliers.view,suppliers.manage,suppliers.pay,reports.finance,reports.clients}')
+on conflict (key) do nothing;
+
 create table if not exists public.profiles (
   id            uuid primary key references auth.users(id) on delete cascade,
   full_name     text not null default '',
@@ -28,6 +49,64 @@ create table if not exists public.profiles (
   created_at    timestamptz not null default now()
 );
 
+alter table public.profiles add column if not exists role_id    uuid references public.roles(id) on delete restrict;
+alter table public.profiles add column if not exists work_days  text[] not null default '{Mon,Tue,Wed,Thu,Fri,Sat}';
+alter table public.profiles add column if not exists work_start time not null default '09:30';
+alter table public.profiles add column if not exists work_end   time not null default '18:30';
+alter table public.profiles add column if not exists joined_on  date;
+-- move the old fixed role onto the new roles table (one-time, safe to re-run)
+update public.profiles p set role_id = r.id from public.roles r where p.role_id is null and r.key = p.role::text;
+
+-- Salary is private: kept apart from profiles (which everyone can read for names).
+create table if not exists public.staff_pay (
+  user_id        uuid primary key references public.profiles(id) on delete cascade,
+  monthly_salary numeric(12,2) not null default 0,
+  cost_per_hour  numeric(10,2) not null default 0,   -- salary ÷ monthly working hours (auto-calculated)
+  updated_at     timestamptz not null default now()
+);
+do $$ begin
+  if exists (select 1 from information_schema.columns where table_schema='public' and table_name='profiles' and column_name='cost_per_hour') then
+    insert into public.staff_pay(user_id, cost_per_hour) select id, cost_per_hour from public.profiles where cost_per_hour > 0
+      on conflict (user_id) do nothing;
+    alter table public.profiles drop column cost_per_hour;
+  end if;
+end $$;
+
+create or replace function public.staff_pay_calc() returns trigger
+language plpgsql security definer set search_path = public as $$
+declare d int; h numeric;
+begin
+  select coalesce(array_length(work_days,1),6), greatest(extract(epoch from (work_end - work_start))/3600, 1)
+    into d, h from public.profiles where id = new.user_id;
+  if coalesce(new.monthly_salary,0) > 0 then
+    new.cost_per_hour := round(new.monthly_salary / (d * h * 52 / 12.0), 2);
+  end if;
+  new.updated_at := now();
+  return new;
+end $$;
+drop trigger if exists trg_staff_pay_calc on public.staff_pay;
+create trigger trg_staff_pay_calc before insert or update on public.staff_pay for each row execute function public.staff_pay_calc();
+
+-- permissions of the signed-in user
+create or replace function public.my_perms() returns text[]
+language sql stable security definer set search_path = public as $$
+  select coalesce((select r.permissions from public.profiles p join public.roles r on r.id = p.role_id
+                   where p.id = auth.uid() and p.active), '{}')
+$$;
+create or replace function public.has_perm(variadic perms text[]) returns boolean
+language sql stable security definer set search_path = public as $$
+  select '*' = any(public.my_perms()) or public.my_perms() && perms
+$$;
+create or replace function public.is_staff() returns boolean
+language sql stable security definer set search_path = public as $$
+  select exists (select 1 from public.profiles where id = auth.uid() and active and role_id is not null)
+$$;
+create or replace function public.my_role_id() returns uuid
+language sql stable security definer set search_path = public as $$
+  select role_id from public.profiles where id = auth.uid() and active
+$$;
+
+-- legacy helpers (fixed roles) kept for backwards compatibility
 -- current user's role (security definer so RLS policies can call it)
 create or replace function public.my_role() returns app_role
 language sql stable security definer set search_path = public as $$
@@ -36,7 +115,7 @@ $$;
 
 create or replace function public.is_admin() returns boolean
 language sql stable security definer set search_path = public as $$
-  select coalesce(public.my_role() = 'admin', false)
+  select '*' = any(public.my_perms())
 $$;
 
 create or replace function public.has_role(roles app_role[]) returns boolean
@@ -54,12 +133,13 @@ begin
   -- The very first account becomes the admin. Every other account starts DISABLED
   -- with no special role; the admin-users server function (Team & Access page)
   -- then sets the real role and activates it. Sign-up metadata is never trusted.
-  insert into public.profiles (id, email, full_name, role, active)
+  insert into public.profiles (id, email, full_name, role, role_id, active)
   values (
     new.id,
     new.email,
     coalesce(new.raw_user_meta_data->>'full_name', split_part(new.email,'@',1)),
     case when first_user then 'admin'::app_role else 'designer'::app_role end,
+    case when first_user then (select id from public.roles where key = 'admin') end,
     first_user
   )
   on conflict (id) do nothing;
@@ -321,13 +401,17 @@ create table if not exists public.queries (
   status       text not null default 'open' check (status in ('open','answered','resolved')),
   from_user    uuid references public.profiles(id) on delete set null default auth.uid(),
   to_user      uuid references public.profiles(id) on delete set null,
-  to_role      app_role,
+  to_role      app_role,                  -- legacy
+  to_role_id   uuid references public.roles(id) on delete set null,
   client_id    uuid references public.clients(id) on delete set null,
   task_id      uuid references public.design_tasks(id) on delete set null,
   resolved_at  timestamptz,
   created_at   timestamptz not null default now(),
   updated_at   timestamptz not null default now()
 );
+
+alter table public.queries add column if not exists to_role_id uuid references public.roles(id) on delete set null;
+update public.queries q set to_role_id = r.id from public.roles r where q.to_role_id is null and q.to_role is not null and r.key = q.to_role::text;
 
 create table if not exists public.query_replies (
   id         uuid primary key default gen_random_uuid(),
@@ -468,7 +552,7 @@ create sequence if not exists public.po_seq start 1;
 create table if not exists public.suppliers (
   id           uuid primary key default gen_random_uuid(),
   name         text not null,
-  category     text default 'Freelance Designer',  -- Freelance Designer, Printing Press, Videographer, Photographer, Developer, Ad Agency, Influencer, Other
+  category     text default 'Freelance Designer',  -- outsourcing suppliers and expense payees (Landlord, Utility, Software, Staff…)
   contact_person text,
   phone        text,
   whatsapp     text,
@@ -734,15 +818,15 @@ create trigger trg_task_events before insert or update on public.design_tasks
 create or replace function public.task_designer_guard() returns trigger
 language plpgsql security definer set search_path = public as $$
 begin
-  if public.my_role() = 'designer' and current_setting('erp.internal', true) is distinct from 'on' then
+  if not public.has_perm('tasks.manage') and current_setting('erp.internal', true) is distinct from 'on' then
     if new.status is distinct from old.status
        and new.status not in ('todo','in_progress','internal_review') then
-      raise exception 'Designers can only set status to To do, In progress or Ready for review';
+      raise exception 'You can only set status to To do, In progress or Ready for review';
     end if;
     if new.title is distinct from old.title or new.client_id is distinct from old.client_id
        or new.due_date is distinct from old.due_date or new.priority is distinct from old.priority
        or new.brief is distinct from old.brief or new.max_revisions is distinct from old.max_revisions then
-      raise exception 'Designers cannot edit the brief, client, due date or priority — raise a query instead';
+      raise exception 'You cannot edit the brief, client, due date or priority — raise a query instead';
     end if;
   end if;
   return new;
@@ -754,10 +838,10 @@ create trigger trg_task_guard before update on public.design_tasks
 create or replace function public.proof_designer_guard() returns trigger
 language plpgsql security definer set search_path = public as $$
 begin
-  if public.my_role() = 'designer' and (
+  if not public.has_perm('tasks.review') and (
        new.status is distinct from old.status or new.review_note is distinct from old.review_note
     or new.client_decision is distinct from old.client_decision) then
-    raise exception 'Only marketers or admins can review proofs';
+    raise exception 'You do not have permission to review proofs';
   end if;
   return new;
 end $$;
@@ -827,8 +911,8 @@ declare r record;
 begin
   if new.to_user is not null then
     perform public.notify(new.to_user, 'New query: ' || new.subject, left(coalesce(new.body,''),140), '/queries/' || new.id);
-  elsif new.to_role is not null then
-    for r in select id from public.profiles where role = new.to_role and active loop
+  elsif new.to_role_id is not null then
+    for r in select id from public.profiles where role_id = new.to_role_id and active loop
       perform public.notify(r.id, 'New query: ' || new.subject, left(coalesce(new.body,''),140), '/queries/' || new.id);
     end loop;
   end if;
@@ -877,7 +961,7 @@ create or replace function public.convert_lead(p_lead uuid) returns uuid
 language plpgsql security definer set search_path = public as $$
 declare l public.leads; cid uuid;
 begin
-  if not public.has_role(array['admin','marketer']::app_role[]) then raise exception 'Not allowed'; end if;
+  if not public.has_perm('leads.manage') then raise exception 'Not allowed'; end if;
   select * into l from public.leads where id = p_lead;
   if l.id is null then raise exception 'Lead not found'; end if;
   if l.converted_client_id is not null then return l.converted_client_id; end if;
@@ -895,7 +979,7 @@ create or replace function public.generate_retainer_invoices(p_month date) retur
 language plpgsql security definer set search_path = public as $$
 declare pk record; m date := date_trunc('month', p_month)::date; n int := 0; st public.settings;
 begin
-  if not public.has_role(array['admin','finance']::app_role[]) then raise exception 'Not allowed'; end if;
+  if not public.has_perm('invoices.manage') then raise exception 'Not allowed'; end if;
   select * into st from public.settings where id = 1;
   for pk in
     select p.* from public.packages p
@@ -961,6 +1045,30 @@ begin
 end $$;
 drop trigger if exists trg_sp_fill on public.supplier_payments;
 create trigger trg_sp_fill before insert or update on public.supplier_payments for each row execute function public.sp_fill_supplier();
+
+-- expenses are paid to a payee from the Suppliers & payees master.
+-- Typing a new name (or importing old text) creates the payee automatically.
+alter table public.expenses add column if not exists supplier_id uuid references public.suppliers(id) on delete set null;
+create index if not exists idx_exp_supplier on public.expenses(supplier_id);
+
+create or replace function public.expense_payee() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  if new.supplier_id is not null then
+    select name into new.vendor from public.suppliers where id = new.supplier_id;
+  elsif nullif(trim(new.vendor), '') is not null then
+    select id into new.supplier_id from public.suppliers where lower(name) = lower(trim(new.vendor)) limit 1;
+    if new.supplier_id is null then
+      insert into public.suppliers(name, category) values (trim(new.vendor), 'Other') returning id into new.supplier_id;
+    end if;
+  end if;
+  return new;
+end $$;
+drop trigger if exists trg_expense_payee on public.expenses;
+create trigger trg_expense_payee before insert or update of supplier_id, vendor on public.expenses
+  for each row execute function public.expense_payee();
+-- link expenses entered before payees existed (safe to re-run)
+update public.expenses set vendor = vendor where supplier_id is null and nullif(trim(vendor), '') is not null;
 
 -- every money movement in one place (in = client payments, out = supplier payments + expenses)
 create or replace view public.v_money_movements with (security_invoker = true) as
@@ -1067,14 +1175,11 @@ from months left join m using(month) left join p using(month) left join e using(
 order by month;
 
 -- ---------------------------------------------------------------------
--- 13. ROW LEVEL SECURITY
---   admin    : everything
---   marketer : CRM, packages, projects, tasks, calendar, quotations, queries
---   designer : read clients/projects/calendar; work on design tasks; proofs; queries
---   finance  : finance tables; read clients/packages/projects
+-- 13. ROW LEVEL SECURITY — every rule checks a permission from the user's role
+--   (roles and their permissions are edited in the app: Team & Access → Roles)
 -- ---------------------------------------------------------------------
 do $$ declare t text; begin
-  foreach t in array array['profiles','settings','services','leads','clients','packages','interactions','projects',
+  foreach t in array array['roles','staff_pay','profiles','settings','services','leads','clients','packages','interactions','projects',
     'design_tasks','task_proofs','task_comments','time_logs','queries','query_replies','content_posts','approval_links',
     'quotations','invoices','payments','expenses','notifications','activity_log',
     'suppliers','supplier_bills','supplier_bill_allocations','supplier_payments'] loop
@@ -1089,131 +1194,162 @@ do $$ declare r record; begin
   end loop;
 end $$;
 
+-- roles: staff read; team managers edit (the built-in Administrator role is protected by trigger)
+create policy p_roles_read  on public.roles for select to authenticated using (public.is_staff());
+create policy p_roles_write on public.roles for all to authenticated using (public.has_perm('team.manage')) with check (public.has_perm('team.manage'));
+
 -- profiles
 create policy p_profiles_read  on public.profiles for select to authenticated using (true);
 create policy p_profiles_self  on public.profiles for update to authenticated
-  using (id = auth.uid()) with check (id = auth.uid() and role = public.my_role() and active);
-create policy p_profiles_admin on public.profiles for all to authenticated using (public.is_admin()) with check (public.is_admin());
+  using (id = auth.uid()) with check (id = auth.uid() and role_id is not distinct from public.my_role_id() and active);
+create policy p_profiles_admin on public.profiles for all to authenticated using (public.has_perm('team.manage')) with check (public.has_perm('team.manage'));
+
+-- salary: only the person themself and team managers (reports get cost rates via staff_cost_rates())
+create policy p_pay_read  on public.staff_pay for select to authenticated
+  using (user_id = auth.uid() or public.has_perm('team.manage'));
+create policy p_pay_write on public.staff_pay for all to authenticated using (public.has_perm('team.manage')) with check (public.has_perm('team.manage'));
 
 -- settings / services
 create policy p_settings_read  on public.settings for select to authenticated using (true);
-create policy p_settings_admin on public.settings for update to authenticated using (public.is_admin());
+create policy p_settings_admin on public.settings for update to authenticated using (public.has_perm('settings.manage'));
 create policy p_services_read  on public.services for select to authenticated using (true);
 create policy p_services_write on public.services for all to authenticated
-  using (public.has_role('{admin,marketer,finance}')) with check (public.has_role('{admin,marketer,finance}'));
+  using (public.has_perm('settings.manage', 'quotations.manage', 'invoices.manage')) with check (public.has_perm('settings.manage', 'quotations.manage', 'invoices.manage'));
 
--- leads & interactions: admin + marketer
-create policy p_leads on public.leads for all to authenticated
-  using (public.has_role('{admin,marketer}')) with check (public.has_role('{admin,marketer}'));
-create policy p_inter_rw on public.interactions for all to authenticated
-  using (public.has_role('{admin,marketer}')) with check (public.has_role('{admin,marketer}'));
-create policy p_inter_finance_read on public.interactions for select to authenticated
-  using (public.has_role('{finance}') and client_id is not null);
+-- leads & conversation log
+create policy p_leads_read on public.leads for select to authenticated using (public.has_perm('leads.view', 'leads.manage'));
+create policy p_leads_rw   on public.leads for all to authenticated using (public.has_perm('leads.manage')) with check (public.has_perm('leads.manage'));
+create policy p_inter_read on public.interactions for select to authenticated
+  using (public.has_perm('leads.view', 'leads.manage') or (client_id is not null and public.has_perm('clients.manage')));
+create policy p_inter_rw   on public.interactions for all to authenticated
+  using (public.has_perm('leads.manage', 'clients.manage')) with check (public.has_perm('leads.manage', 'clients.manage'));
 
--- clients: everyone reads; admin+marketer write
-create policy p_clients_read  on public.clients for select to authenticated using (public.my_role() is not null);
-create policy p_clients_write on public.clients for insert to authenticated with check (public.has_role('{admin,marketer}'));
-create policy p_clients_upd   on public.clients for update to authenticated using (public.has_role('{admin,marketer}'));
+-- clients (staff with any working permission can see names; full list needs clients.view)
+create policy p_clients_read  on public.clients for select to authenticated
+  using (public.has_perm('clients.view', 'clients.manage', 'tasks.view', 'tasks.work', 'invoices.view', 'quotations.view', 'calendar.view', 'suppliers.view', 'leads.manage'));
+create policy p_clients_write on public.clients for insert to authenticated with check (public.has_perm('clients.manage', 'leads.manage'));
+create policy p_clients_upd   on public.clients for update to authenticated using (public.has_perm('clients.manage'));
 create policy p_clients_del   on public.clients for delete to authenticated using (public.is_admin());
 
--- packages: read by admin/marketer/finance; write admin/marketer
-create policy p_pk_read  on public.packages for select to authenticated using (public.has_role('{admin,marketer,finance}'));
-create policy p_pk_write on public.packages for all to authenticated
-  using (public.has_role('{admin,marketer}')) with check (public.has_role('{admin,marketer}'));
+create policy p_pk_read  on public.packages for select to authenticated using (public.has_perm('packages.view', 'packages.manage', 'invoices.manage'));
+create policy p_pk_write on public.packages for all to authenticated using (public.has_perm('packages.manage')) with check (public.has_perm('packages.manage'));
 
--- projects: everyone reads; admin+marketer write
-create policy p_proj_read  on public.projects for select to authenticated using (public.my_role() is not null);
-create policy p_proj_write on public.projects for all to authenticated
-  using (public.has_role('{admin,marketer}')) with check (public.has_role('{admin,marketer}'));
+create policy p_proj_read  on public.projects for select to authenticated using (public.has_perm('projects.view', 'projects.manage', 'tasks.view', 'tasks.work', 'tasks.manage'));
+create policy p_proj_write on public.projects for all to authenticated using (public.has_perm('projects.manage')) with check (public.has_perm('projects.manage'));
 
--- design tasks
+-- design tasks: tasks.view sees all; tasks.work sees own + unassigned
 create policy p_task_read on public.design_tasks for select to authenticated
-  using (public.has_role('{admin,marketer,designer}'));
-create policy p_task_ins on public.design_tasks for insert to authenticated
-  with check (public.has_role('{admin,marketer}'));
-create policy p_task_upd_mgr on public.design_tasks for update to authenticated
-  using (public.has_role('{admin,marketer}'));
-create policy p_task_upd_designer on public.design_tasks for update to authenticated
-  using (public.has_role('{designer}') and (assignee_id = auth.uid() or assignee_id is null))
+  using (public.has_perm('tasks.view', 'tasks.manage', 'tasks.review') or (public.has_perm('tasks.work') and (assignee_id = auth.uid() or assignee_id is null)));
+create policy p_task_ins on public.design_tasks for insert to authenticated with check (public.has_perm('tasks.manage'));
+create policy p_task_upd_mgr on public.design_tasks for update to authenticated using (public.has_perm('tasks.manage', 'tasks.review'));
+create policy p_task_upd_worker on public.design_tasks for update to authenticated
+  using (public.has_perm('tasks.work') and (assignee_id = auth.uid() or assignee_id is null))
   with check (assignee_id = auth.uid());
-create policy p_task_del on public.design_tasks for delete to authenticated using (public.has_role('{admin,marketer}'));
+create policy p_task_del on public.design_tasks for delete to authenticated using (public.has_perm('tasks.manage'));
 
--- proofs
-create policy p_proof_read on public.task_proofs for select to authenticated using (public.has_role('{admin,marketer,designer}'));
-create policy p_proof_ins  on public.task_proofs for insert to authenticated with check (public.has_role('{admin,marketer,designer}'));
+create policy p_proof_read on public.task_proofs for select to authenticated
+  using (exists (select 1 from public.design_tasks t where t.id = task_id));
+create policy p_proof_ins  on public.task_proofs for insert to authenticated with check (public.has_perm('tasks.work', 'tasks.manage', 'tasks.review'));
 create policy p_proof_upd  on public.task_proofs for update to authenticated
-  using (public.has_role('{admin,marketer}') or uploaded_by = auth.uid());
+  using (public.has_perm('tasks.review', 'tasks.manage') or uploaded_by = auth.uid());
 create policy p_proof_del  on public.task_proofs for delete to authenticated
   using (public.is_admin() or (uploaded_by = auth.uid() and status = 'pending'));
 
--- comments
-create policy p_cmt_read on public.task_comments for select to authenticated using (public.has_role('{admin,marketer,designer}'));
+create policy p_cmt_read on public.task_comments for select to authenticated
+  using (exists (select 1 from public.design_tasks t where t.id = task_id));
 create policy p_cmt_ins  on public.task_comments for insert to authenticated
-  with check (public.has_role('{admin,marketer,designer}') and author_id = auth.uid());
+  with check (author_id = auth.uid() and exists (select 1 from public.design_tasks t where t.id = task_id));
 create policy p_cmt_del  on public.task_comments for delete to authenticated using (public.is_admin() or author_id = auth.uid());
 
--- time logs: own rows; admin sees all; marketer reads all (for monitoring)
-create policy p_time_read on public.time_logs for select to authenticated
-  using (user_id = auth.uid() or public.has_role('{admin,marketer}'));
-create policy p_time_ins on public.time_logs for insert to authenticated with check (user_id = auth.uid() or public.is_admin());
-create policy p_time_upd on public.time_logs for update to authenticated using (user_id = auth.uid() or public.is_admin());
-create policy p_time_del on public.time_logs for delete to authenticated using (user_id = auth.uid() or public.is_admin());
+-- time logs: own rows; timesheet.all sees everyone's
+create policy p_time_read on public.time_logs for select to authenticated using (user_id = auth.uid() or public.has_perm('timesheet.all', 'reports.team', 'reports.clients'));
+create policy p_time_ins on public.time_logs for insert to authenticated with check ((user_id = auth.uid() and public.is_staff()) or public.has_perm('team.manage'));
+create policy p_time_upd on public.time_logs for update to authenticated using (user_id = auth.uid() or public.has_perm('team.manage'));
+create policy p_time_del on public.time_logs for delete to authenticated using (user_id = auth.uid() or public.has_perm('team.manage'));
 
--- queries: visible to sender, recipient, recipient role, admin
+-- team queries: sender, recipient, recipient role, admin
 create policy p_q_read on public.queries for select to authenticated
-  using (public.is_admin() or from_user = auth.uid() or to_user = auth.uid() or to_role = public.my_role());
-create policy p_q_ins  on public.queries for insert to authenticated with check (from_user = auth.uid());
+  using (public.is_admin() or from_user = auth.uid() or to_user = auth.uid() or to_role_id = public.my_role_id());
+create policy p_q_ins  on public.queries for insert to authenticated with check (from_user = auth.uid() and public.is_staff());
 create policy p_q_upd  on public.queries for update to authenticated
-  using (public.is_admin() or from_user = auth.uid() or to_user = auth.uid() or to_role = public.my_role());
+  using (public.is_admin() or from_user = auth.uid() or to_user = auth.uid() or to_role_id = public.my_role_id());
 create policy p_q_del  on public.queries for delete to authenticated using (public.is_admin() or from_user = auth.uid());
-
 create policy p_qr_read on public.query_replies for select to authenticated
   using (exists (select 1 from public.queries q where q.id = query_id));
 create policy p_qr_ins on public.query_replies for insert to authenticated
   with check (author_id = auth.uid() and exists (select 1 from public.queries q where q.id = query_id));
 
--- content calendar: admin/marketer write; designer read
-create policy p_post_read  on public.content_posts for select to authenticated using (public.has_role('{admin,marketer,designer}'));
-create policy p_post_write on public.content_posts for all to authenticated
-  using (public.has_role('{admin,marketer}')) with check (public.has_role('{admin,marketer}'));
-
+-- content calendar & client approval links
+create policy p_post_read  on public.content_posts for select to authenticated using (public.has_perm('calendar.view', 'calendar.manage'));
+create policy p_post_write on public.content_posts for all to authenticated using (public.has_perm('calendar.manage')) with check (public.has_perm('calendar.manage'));
 create policy p_links on public.approval_links for all to authenticated
-  using (public.has_role('{admin,marketer}')) with check (public.has_role('{admin,marketer}'));
+  using (public.has_perm('calendar.manage', 'clients.manage')) with check (public.has_perm('calendar.manage', 'clients.manage'));
 
--- quotations: admin/marketer/finance
-create policy p_quote on public.quotations for all to authenticated
-  using (public.has_role('{admin,marketer,finance}')) with check (public.has_role('{admin,marketer,finance}'));
+-- finance
+create policy p_quote_read on public.quotations for select to authenticated using (public.has_perm('quotations.view', 'quotations.manage'));
+create policy p_quote_rw   on public.quotations for all to authenticated using (public.has_perm('quotations.manage')) with check (public.has_perm('quotations.manage'));
+create policy p_inv_read on public.invoices for select to authenticated using (public.has_perm('invoices.view', 'invoices.manage', 'payments.manage'));
+create policy p_inv_rw   on public.invoices for all to authenticated using (public.has_perm('invoices.manage')) with check (public.has_perm('invoices.manage'));
+create policy p_inv_paid on public.invoices for update to authenticated using (public.has_perm('payments.manage'));  -- mark sent when recording a payment
+create policy p_pay_read on public.payments for select to authenticated using (public.has_perm('payments.manage', 'invoices.view', 'invoices.manage', 'reports.finance'));
+create policy p_pay_rw   on public.payments for all to authenticated using (public.has_perm('payments.manage')) with check (public.has_perm('payments.manage'));
+create policy p_exp_read on public.expenses for select to authenticated using (public.has_perm('expenses.manage', 'payments.manage', 'reports.finance', 'reports.clients'));
+create policy p_exp_rw   on public.expenses for all to authenticated using (public.has_perm('expenses.manage')) with check (public.has_perm('expenses.manage'));
 
--- invoices/payments/expenses: admin + finance (marketer can read invoices to follow up)
-create policy p_inv_rw   on public.invoices for all to authenticated
-  using (public.has_role('{admin,finance}')) with check (public.has_role('{admin,finance}'));
-create policy p_inv_mkt  on public.invoices for select to authenticated using (public.has_role('{marketer}'));
-create policy p_pay_rw   on public.payments for all to authenticated
-  using (public.has_role('{admin,finance}')) with check (public.has_role('{admin,finance}'));
-create policy p_exp_rw   on public.expenses for all to authenticated
-  using (public.has_role('{admin,finance}')) with check (public.has_role('{admin,finance}'));
-
--- suppliers & work orders: admin/finance full; marketers can create work orders and see costs; payments admin/finance
-create policy p_sup_read  on public.suppliers for select to authenticated using (public.has_role('{admin,marketer,finance}'));
-create policy p_sup_write on public.suppliers for all to authenticated
-  using (public.has_role('{admin,marketer,finance}')) with check (public.has_role('{admin,marketer,finance}'));
-create policy p_sb_rw  on public.supplier_bills for all to authenticated
-  using (public.has_role('{admin,marketer,finance}')) with check (public.has_role('{admin,marketer,finance}'));
-create policy p_sba_rw on public.supplier_bill_allocations for all to authenticated
-  using (public.has_role('{admin,marketer,finance}')) with check (public.has_role('{admin,marketer,finance}'));
-create policy p_sp_rw  on public.supplier_payments for all to authenticated
-  using (public.has_role('{admin,finance}')) with check (public.has_role('{admin,finance}'));
-create policy p_sp_mkt on public.supplier_payments for select to authenticated using (public.has_role('{marketer}'));
-
+-- suppliers & work orders
+create policy p_sup_read on public.suppliers for select to authenticated using (public.has_perm('suppliers.view', 'suppliers.manage', 'suppliers.pay', 'expenses.manage', 'payments.manage', 'reports.finance'));
+create policy p_sup_rw   on public.suppliers for all to authenticated using (public.has_perm('suppliers.manage', 'expenses.manage')) with check (public.has_perm('suppliers.manage', 'expenses.manage'));
+create policy p_sb_read  on public.supplier_bills for select to authenticated using (public.has_perm('suppliers.view', 'suppliers.manage', 'suppliers.pay', 'reports.finance', 'reports.clients'));
+create policy p_sb_rw    on public.supplier_bills for all to authenticated using (public.has_perm('suppliers.manage')) with check (public.has_perm('suppliers.manage'));
+create policy p_sba_read on public.supplier_bill_allocations for select to authenticated using (public.has_perm('suppliers.view', 'suppliers.manage', 'suppliers.pay', 'reports.clients', 'invoices.view'));
+create policy p_sba_rw   on public.supplier_bill_allocations for all to authenticated using (public.has_perm('suppliers.manage')) with check (public.has_perm('suppliers.manage'));
+create policy p_sp_read  on public.supplier_payments for select to authenticated using (public.has_perm('suppliers.view', 'suppliers.pay', 'payments.manage', 'reports.finance', 'invoices.view'));
+create policy p_sp_rw    on public.supplier_payments for all to authenticated using (public.has_perm('suppliers.pay')) with check (public.has_perm('suppliers.pay'));
 
 -- notifications: own only
 create policy p_notif_read on public.notifications for select to authenticated using (user_id = auth.uid());
 create policy p_notif_upd  on public.notifications for update to authenticated using (user_id = auth.uid());
 create policy p_notif_del  on public.notifications for delete to authenticated using (user_id = auth.uid());
 
--- activity log: admin reads; anyone signed in can append
+-- activity log
 create policy p_act_read on public.activity_log for select to authenticated using (public.is_admin());
 create policy p_act_ins  on public.activity_log for insert to authenticated with check (actor_id = auth.uid());
+
+-- protect the built-in Administrator role and keep at least one active administrator
+create or replace function public.protect_roles() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  if tg_op in ('UPDATE','DELETE') and old.key = 'admin' then
+    if tg_op = 'DELETE' then raise exception 'The Administrator role cannot be deleted'; end if;
+    new.permissions := '{*}'; new.is_system := true; new.key := 'admin';
+  end if;
+  if tg_op = 'DELETE' and exists (select 1 from public.profiles where role_id = old.id) then
+    raise exception 'Move the users on this role to another role before deleting it';
+  end if;
+  return coalesce(new, old);
+end $$;
+drop trigger if exists trg_protect_roles on public.roles;
+create trigger trg_protect_roles before update or delete on public.roles for each row execute function public.protect_roles();
+
+create or replace function public.keep_one_admin() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  if not exists (select 1 from public.profiles p join public.roles r on r.id = p.role_id where r.key = 'admin' and p.active) then
+    raise exception 'At least one active Administrator is required';
+  end if;
+  return null;
+end $$;
+drop trigger if exists trg_keep_one_admin on public.profiles;
+create trigger trg_keep_one_admin after update of role_id, active on public.profiles
+  for each row execute function public.keep_one_admin();
+
+-- internal cost per hour for profitability reports — never exposes the salary itself
+create or replace function public.staff_cost_rates() returns table (user_id uuid, cost_per_hour numeric)
+language sql stable security definer set search_path = public as $$
+  select sp.user_id, sp.cost_per_hour from public.staff_pay sp
+  where public.has_perm('team.manage', 'reports.clients', 'reports.team')
+$$;
+grant execute on function public.staff_cost_rates() to authenticated;
 
 -- ---------------------------------------------------------------------
 -- 14. STORAGE BUCKETS (proofs, receipts, files)
@@ -1229,17 +1365,17 @@ drop policy if exists "erp receipts" on storage.objects;
 drop policy if exists "erp files" on storage.objects;
 
 create policy "erp read proofs" on storage.objects for select to authenticated
-  using (bucket_id = 'proofs' and public.has_role('{admin,marketer,designer}'));
+  using (bucket_id = 'proofs' and public.has_perm('tasks.view', 'tasks.work', 'tasks.manage', 'tasks.review'));
 create policy "erp write proofs" on storage.objects for insert to authenticated
-  with check (bucket_id = 'proofs' and public.has_role('{admin,marketer,designer}'));
+  with check (bucket_id = 'proofs' and public.has_perm('tasks.work', 'tasks.manage', 'tasks.review'));
 create policy "erp delete proofs" on storage.objects for delete to authenticated
   using (bucket_id = 'proofs' and (public.is_admin() or owner = auth.uid()));
 create policy "erp receipts" on storage.objects for all to authenticated
-  using (bucket_id = 'receipts' and public.has_role('{admin,finance}'))
-  with check (bucket_id = 'receipts' and public.has_role('{admin,finance}'));
+  using (bucket_id = 'receipts' and public.has_perm('expenses.manage'))
+  with check (bucket_id = 'receipts' and public.has_perm('expenses.manage'));
 create policy "erp files" on storage.objects for all to authenticated
-  using (bucket_id = 'files' and public.my_role() is not null)
-  with check (bucket_id = 'files' and public.my_role() is not null);
+  using (bucket_id = 'files' and public.is_staff())
+  with check (bucket_id = 'files' and public.is_staff());
 
 -- client portal needs to show proof images: signed URLs are generated by a
 -- security-definer-free path, so we expose a tiny function returning the path

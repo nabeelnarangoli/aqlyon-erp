@@ -36,9 +36,9 @@ export default function Payments() {
 
   const ledger = useMemo(() => {
     const rows = [
-      ...inc.map((p) => ({ id: p.id, d: p.paid_on, dir: 'in', kind: 'Customer payment', who: p.clients?.name, ref: p.invoices?.number, refLink: p.invoice_id && `/finance/invoices/${p.invoice_id}`, method: p.method, note: p.reference, amt: Number(p.amount) })),
-      ...out.map((p) => ({ id: p.id, d: p.paid_on, dir: 'out', kind: `Supplier · ${p.kind}`, who: p.suppliers?.name, forWho: custOf(p), ref: p.supplier_bills?.number, bill: p.supplier_bills?.id, method: p.method, note: p.reference, amt: Number(p.amount) })),
-      ...exp.map((e) => ({ id: e.id, d: e.spent_on, dir: 'out', kind: `Expense · ${e.category}`, who: e.vendor, forWho: e.clients?.name, method: e.method, note: e.description, amt: Number(e.amount) }))
+      ...inc.map((p) => ({ id: p.id, d: p.paid_on, dir: 'in', kind: 'Customer payment', who: p.clients?.name, whoLink: p.client_id && `/clients/${p.client_id}`, ref: p.invoices?.number, refLink: p.invoice_id && `/finance/invoices/${p.invoice_id}`, method: p.method, note: p.reference, amt: Number(p.amount) })),
+      ...out.map((p) => ({ id: p.id, d: p.paid_on, dir: 'out', kind: `Supplier · ${p.kind}`, who: p.suppliers?.name, whoLink: `/finance/suppliers/${p.supplier_id}`, forWho: custOf(p), ref: p.supplier_bills?.number, bill: p.supplier_bills?.id, method: p.method, note: p.reference, amt: Number(p.amount) })),
+      ...exp.map((e) => ({ id: e.id, d: e.spent_on, dir: 'out', kind: `Expense · ${e.category}`, who: e.vendor, whoLink: e.supplier_id && `/finance/suppliers/${e.supplier_id}`, forWho: e.clients?.name, method: e.method, note: e.description, amt: Number(e.amount) }))
     ].sort((a, b) => a.d.localeCompare(b.d) || (a.dir === 'in' ? -1 : 1))
     let bal = 0
     return rows.map((r) => ({ ...r, bal: (bal += r.dir === 'in' ? r.amt : -r.amt) })).reverse()
@@ -76,7 +76,7 @@ export default function Payments() {
               <tr key={r.dir + r.id} className={r.bill ? 'click' : ''} onClick={() => r.bill && setBill(r.bill)}>
                 <td className="nowrap">{date(r.d)}</td>
                 <td><Badge tone={r.dir === 'in' ? 'green' : r.kind.startsWith('Supplier') ? 'orange' : 'slate'}>{r.dir === 'in' ? '↓ In' : '↑ Out'}</Badge> <span className="small">{r.kind}</span></td>
-                <td className="cell-title">{r.who || '—'}</td>
+                <td className="cell-title">{r.whoLink ? <Link to={r.whoLink} onClick={(e) => e.stopPropagation()} title="Open account statement">{r.who}</Link> : r.who || '—'}</td>
                 <td className="small">{r.dir === 'in' ? r.who : r.forWho || <span className="faint">—</span>}</td>
                 <td className="small">{r.refLink ? <Link to={r.refLink} onClick={(e) => e.stopPropagation()}>{r.ref}</Link> : r.ref || r.note || '—'}</td>
                 <td className="num" style={{ color: 'var(--green-d)' }}>{r.dir === 'in' ? money2(r.amt) : ''}</td>
@@ -92,7 +92,7 @@ export default function Payments() {
             <thead><tr><th>Date</th><th>Customer</th><th>Invoice</th><th>Method</th><th>Reference</th><th className="num">Amount</th></tr></thead>
             <tbody>{inc.map((p) => (
               <tr key={p.id}>
-                <td className="nowrap">{date(p.paid_on)}</td><td className="cell-title">{p.clients?.name || '—'}</td>
+                <td className="nowrap">{date(p.paid_on)}</td><td className="cell-title">{p.client_id ? <Link to={`/clients/${p.client_id}`}>{p.clients?.name}</Link> : '—'}</td>
                 <td>{p.invoice_id ? <Link to={`/finance/invoices/${p.invoice_id}`}>{p.invoices?.number}</Link> : <Badge tone="amber">On account</Badge>}</td>
                 <td>{p.method}</td><td className="small muted">{p.reference || p.note || '—'}</td><td className="num strong">{money2(p.amount)}</td>
               </tr>))}</tbody>
@@ -105,7 +105,7 @@ export default function Payments() {
             <thead><tr><th>Date</th><th>Supplier</th><th>Work order</th><th>For customer</th><th>Type</th><th>Method</th><th className="num">Amount</th></tr></thead>
             <tbody>{out.map((p) => (
               <tr key={p.id} className="click" onClick={() => p.supplier_bills?.id && setBill(p.supplier_bills.id)}>
-                <td className="nowrap">{date(p.paid_on)}</td><td className="cell-title">{p.suppliers?.name}</td>
+                <td className="nowrap">{date(p.paid_on)}</td><td className="cell-title"><Link to={`/finance/suppliers/${p.supplier_id}`} onClick={(e) => e.stopPropagation()}>{p.suppliers?.name}</Link></td>
                 <td><div>{p.supplier_bills?.title}</div><div className="cell-sub">{p.supplier_bills?.number}</div></td>
                 <td className="small">{custOf(p) || <span className="faint">Internal</span>}</td>
                 <td><Badge tone={p.kind === 'final' ? 'green' : 'blue'}>{p.kind}</Badge></td><td>{p.method}{p.reference && <div className="cell-sub">{p.reference}</div>}</td>

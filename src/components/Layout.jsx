@@ -8,45 +8,45 @@ import { useAuth } from '../lib/auth'
 import { supabase, q, DEMO } from '../lib/supabase'
 import { resetDemo } from '../lib/demo'
 import { useData, useRealtime, useDebounced } from '../lib/hooks'
-import { ROLES } from '../lib/constants'
+import { REPORT_PERMS } from '../lib/permissions'
 import { ago } from '../lib/format'
 import { Avatar, IconBtn, SearchInput, Badge, cx } from './ui'
 
 const NAV = [
   { group: null, items: [
-    { to: '/', label: 'Dashboard', icon: LayoutDashboard, roles: ['marketer', 'designer', 'finance'], end: true }
+    { to: '/', label: 'Dashboard', icon: LayoutDashboard, perm: [], end: true }
   ] },
   { group: 'CRM', items: [
-    { to: '/leads', label: 'Leads & Pipeline', icon: Target, roles: ['marketer'] },
-    { to: '/clients', label: 'Clients', icon: Building2, roles: ['marketer', 'designer', 'finance'] },
-    { to: '/followups', label: 'Follow-ups', icon: PhoneCall, roles: ['marketer'], badge: 'followups' },
-    { to: '/projects', label: 'Campaigns & Projects', icon: Megaphone, roles: ['marketer', 'designer'] }
+    { to: '/leads', label: 'Leads & Pipeline', icon: Target, perm: ['leads.view', 'leads.manage'] },
+    { to: '/clients', label: 'Clients', icon: Building2, perm: ['clients.view', 'clients.manage'] },
+    { to: '/followups', label: 'Follow-ups', icon: PhoneCall, perm: ['leads.manage', 'clients.manage'], badge: 'followups' },
+    { to: '/projects', label: 'Campaigns & Projects', icon: Megaphone, perm: ['projects.view', 'projects.manage'] }
   ] },
   { group: 'Production', items: [
-    { to: '/tasks', label: 'Design Tasks', icon: Palette, roles: ['marketer', 'designer'], badge: 'tasks' },
-    { to: '/calendar', label: 'Content Calendar', icon: CalendarDays, roles: ['marketer', 'designer'] },
-    { to: '/timesheet', label: 'Timesheet', icon: Clock, roles: ['marketer', 'designer'] },
-    { to: '/queries', label: 'Team Queries', icon: MessagesSquare, roles: ['marketer', 'designer', 'finance'], badge: 'queries' }
+    { to: '/tasks', label: 'Design Tasks', icon: Palette, perm: ['tasks.view', 'tasks.work', 'tasks.manage', 'tasks.review'], badge: 'tasks' },
+    { to: '/calendar', label: 'Content Calendar', icon: CalendarDays, perm: ['calendar.view', 'calendar.manage'] },
+    { to: '/timesheet', label: 'Timesheet', icon: Clock, perm: ['tasks.work', 'tasks.manage', 'timesheet.all'] },
+    { to: '/queries', label: 'Team Queries', icon: MessagesSquare, perm: [], badge: 'queries' }
   ] },
   { group: 'Finance', items: [
-    { to: '/finance/quotations', label: 'Quotations', icon: FileSignature, roles: ['marketer', 'finance'] },
-    { to: '/finance/invoices', label: 'Invoices', icon: FileText, roles: ['finance', 'marketer'] },
-    { to: '/finance/payments', label: 'Payments & cash flow', icon: Wallet, roles: ['finance'] },
-    { to: '/finance/work-orders', label: 'Supplier work orders', icon: Truck, roles: ['finance', 'marketer'] },
-    { to: '/finance/suppliers', label: 'Suppliers', icon: Store, roles: ['finance', 'marketer'] },
-    { to: '/finance/expenses', label: 'Expenses', icon: Receipt, roles: ['finance'] }
+    { to: '/finance/quotations', label: 'Quotations', icon: FileSignature, perm: ['quotations.view', 'quotations.manage'] },
+    { to: '/finance/invoices', label: 'Invoices', icon: FileText, perm: ['invoices.view', 'invoices.manage'] },
+    { to: '/finance/payments', label: 'Payments & cash flow', icon: Wallet, perm: ['payments.manage'] },
+    { to: '/finance/work-orders', label: 'Supplier work orders', icon: Truck, perm: ['suppliers.view', 'suppliers.manage', 'suppliers.pay'] },
+    { to: '/finance/suppliers', label: 'Suppliers & payees', icon: Store, perm: ['suppliers.view', 'suppliers.manage', 'suppliers.pay', 'expenses.manage', 'payments.manage'] },
+    { to: '/finance/expenses', label: 'Expenses', icon: Receipt, perm: ['expenses.manage'] }
   ] },
   { group: 'Insights', items: [
-    { to: '/reports', label: 'Reports', icon: BarChart3, roles: ['marketer', 'finance', 'designer'] }
+    { to: '/reports', label: 'Reports', icon: BarChart3, perm: REPORT_PERMS }
   ] },
   { group: 'Admin', items: [
-    { to: '/team', label: 'Team & Access', icon: Users, roles: [] },
-    { to: '/settings', label: 'Settings', icon: Settings, roles: [] }
+    { to: '/team', label: 'Team & Access', icon: Users, perm: ['team.manage'] },
+    { to: '/settings', label: 'Settings', icon: Settings, perm: ['settings.manage'] }
   ] }
 ]
 
 export default function Layout() {
-  const { profile, can, signOut, user } = useAuth()
+  const { profile, has, role, signOut, user } = useAuth()
   const [open, setOpen] = useState(false)
   const loc = useLocation()
   useEffect(() => setOpen(false), [loc.pathname])
@@ -54,11 +54,11 @@ export default function Layout() {
   const counts = useData(async () => {
     const uid = user.id
     const [tasks, queries, fups] = await Promise.all([
-      profile.role === 'designer'
+      has('tasks.work') && !has('tasks.manage', 'tasks.review')
         ? supabase.from('design_tasks').select('id', { count: 'exact', head: true }).eq('assignee_id', uid).in('status', ['todo', 'in_progress', 'revision'])
         : supabase.from('design_tasks').select('id', { count: 'exact', head: true }).in('status', ['internal_review']),
       supabase.from('queries').select('id', { count: 'exact', head: true }).neq('status', 'resolved').neq('from_user', uid),
-      can('marketer')
+      has('leads.manage', 'clients.manage')
         ? supabase.from('interactions').select('id', { count: 'exact', head: true }).eq('done', false).not('next_action_date', 'is', null).lte('next_action_date', new Date().toISOString().slice(0, 10))
         : Promise.resolve({ count: 0 })
     ])
@@ -74,7 +74,7 @@ export default function Layout() {
         </div>
         <nav className="nav">
           {NAV.map((g) => {
-            const items = g.items.filter((i) => can(...i.roles))
+            const items = g.items.filter((i) => !i.perm.length || has(...i.perm))
             if (!items.length) return null
             return (
               <div key={g.group || 'main'}>
@@ -91,7 +91,7 @@ export default function Layout() {
         </nav>
         <div className="side-foot">
           <Avatar name={profile.full_name} url={profile.avatar_url} size={34} />
-          <div className="who"><b className="ellipsis">{profile.full_name}</b><span>{ROLES[profile.role]?.label}</span></div>
+          <div className="who"><b className="ellipsis">{profile.full_name}</b><span>{role?.name || 'No role'}</span></div>
           <IconBtn icon={LogOut} title="Sign out" onClick={signOut} />
         </div>
       </aside>
@@ -110,7 +110,7 @@ export default function Layout() {
 }
 
 function GlobalSearch() {
-  const { can } = useAuth()
+  const { has } = useAuth()
   const nav = useNavigate()
   const [term, setTerm] = useState('')
   const [open, setOpen] = useState(false)
@@ -123,13 +123,13 @@ function GlobalSearch() {
       supabase.from('clients').select('id,name,code').or(`name.ilike.${like},contact_person.ilike.${like},phone.ilike.${like},code.ilike.${like}`).limit(5)
         .then((r) => (r.data || []).map((x) => ({ k: 'Client', label: x.name, sub: x.code, to: `/clients/${x.id}` })))
     ]
-    if (can('marketer', 'designer')) jobs.push(
+    if (has('tasks.view', 'tasks.work', 'tasks.manage')) jobs.push(
       supabase.from('design_tasks').select('id,title,code').or(`title.ilike.${like},code.ilike.${like}`).limit(5)
         .then((r) => (r.data || []).map((x) => ({ k: 'Task', label: x.title, sub: x.code, to: `/tasks/${x.id}` }))))
-    if (can('marketer')) jobs.push(
+    if (has('leads.view', 'leads.manage')) jobs.push(
       supabase.from('leads').select('id,name,company,phone').or(`name.ilike.${like},company.ilike.${like},phone.ilike.${like}`).limit(5)
         .then((r) => (r.data || []).map((x) => ({ k: 'Lead', label: x.company || x.name, sub: x.name, to: `/leads?open=${x.id}` }))))
-    if (can('finance', 'marketer')) jobs.push(
+    if (has('invoices.view', 'invoices.manage')) jobs.push(
       supabase.from('invoices').select('id,number,total').ilike('number', like).limit(5)
         .then((r) => (r.data || []).map((x) => ({ k: 'Invoice', label: x.number, sub: '', to: `/finance/invoices/${x.id}` }))))
     return (await Promise.all(jobs)).flat()

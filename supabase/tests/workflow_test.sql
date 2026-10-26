@@ -8,9 +8,9 @@ insert into auth.users(id,email,raw_user_meta_data) values
  ('00000000-0000-0000-0000-00000000000c','des@aq.test','{"full_name":"Designer","role":"designer"}'),
  ('00000000-0000-0000-0000-00000000000d','fin@aq.test','{"full_name":"Finance","role":"finance"}');
 -- simulate the admin-users function activating staff with their roles
-update public.profiles set active = true, role = (select (raw_user_meta_data->>'role')::app_role from auth.users u where u.id = profiles.id)
+update public.profiles set active = true, role_id = (select r.id from auth.users u join public.roles r on r.key = u.raw_user_meta_data->>'role' where u.id = profiles.id)
   where exists (select 1 from auth.users u where u.id = profiles.id and u.raw_user_meta_data ? 'role');
-select email, role from public.profiles order by email;
+select p.email, r.name from public.profiles p left join public.roles r on r.id = p.role_id order by email;
 
 create or replace function pg_temp.as_user(u text) returns void language plpgsql as $$
 begin perform set_config('request.jwt.claim.sub', u, false); execute 'set role authenticated'; end $$;
@@ -44,7 +44,7 @@ do $$ begin begin update design_tasks set status='approved' where id='20000000-0
 insert into task_proofs(task_id,file_path,note) values ('20000000-0000-0000-0000-000000000001','x/v1.png','first draft');
 select 'after proof' t, status from design_tasks;
 insert into time_logs(task_id,minutes,note) values ('20000000-0000-0000-0000-000000000001',90,'design');
-insert into queries(subject,body,to_role,task_id) values ('Need logo PNG','Client logo is low res','marketer','20000000-0000-0000-0000-000000000001');
+insert into queries(subject,body,to_role_id,task_id) values ('Need logo PNG','Client logo is low res',(select id from roles where key='marketer'),'20000000-0000-0000-0000-000000000001');
 select 'designer sees clients' t, count(*) from clients;
 select 'designer sees leads' t, count(*) from leads;
 select 'designer sees invoices' t, count(*) from invoices;
@@ -97,8 +97,8 @@ reset role;
 select p.full_name, n.title from notifications n join profiles p on p.id=n.user_id order by n.created_at;
 select pg_temp.as_user('00000000-0000-0000-0000-00000000000c');
 select 'designer own notifs' t, count(*) from notifications;
-do $$ begin begin update profiles set role='admin' where id=auth.uid();
-  if (select role from profiles where id=auth.uid())='admin' then raise exception 'FAIL self-promote'; end if;
+do $$ begin begin update profiles set role_id=(select id from roles where key='admin') where id=auth.uid();
+  if (select role_id from profiles where id=auth.uid())=(select id from roles where key='admin') then raise exception 'FAIL self-promote'; end if;
   exception when insufficient_privilege then null; end;
   raise notice 'ok: designer cannot self-promote'; end $$;
 reset role;
@@ -121,12 +121,43 @@ select pg_temp.as_user('00000000-0000-0000-0000-00000000000c');
 select 'designer sees supplier bills' t, count(*) from supplier_bills;
 reset role;
 
+-- ===== PAYEES: typed vendor becomes a payee; second expense links to the same payee
+select pg_temp.as_user('00000000-0000-0000-0000-00000000000d');
+insert into expenses(category, vendor, amount) values ('Rent','Muhyiddin Building',18000), ('Rent','muhyiddin building ',18000);
+select 'payee rows' t, count(distinct supplier_id), min(vendor) from expenses where category='Rent';
+reset role;
+
 -- self-signup with a forged role must NOT get access
 insert into auth.users(id,email,raw_user_meta_data) values ('00000000-0000-0000-0000-0000000000ff','hacker@x.test','{"role":"admin"}');
 do $$ begin
-  if (select active or role = 'admin' from public.profiles where id = '00000000-0000-0000-0000-0000000000ff') then raise exception 'FAIL forged role accepted'; end if;
+  if (select active or role_id is not null from public.profiles where id = '00000000-0000-0000-0000-0000000000ff') then raise exception 'FAIL forged role accepted'; end if;
 end $$;
 select pg_temp.as_user('00000000-0000-0000-0000-0000000000ff');
 select 'forged user sees clients' t, count(*) from clients;
 reset role;
+-- ===== CUSTOM ROLE: "Social Media Executive" can see calendar + tasks but not finance
+insert into roles(name, permissions) values ('Social Media Executive', '{calendar.view,calendar.manage,tasks.view,clients.view}');
+update profiles set role_id = (select id from roles where name='Social Media Executive') where email='des@aq.test';
+select pg_temp.as_user('00000000-0000-0000-0000-00000000000c');
+select 'custom role sees posts' t, count(*) from content_posts;
+select 'custom role sees invoices (0)' t, count(*) from invoices;
+select 'custom role sees leads (0)' t, count(*) from leads;
+do $$ begin begin insert into design_tasks(title) values ('x'); raise exception 'FAIL created task without tasks.manage';
+  exception when insufficient_privilege then raise notice 'ok'; end; end $$;
+reset role;
+-- salary is private
+insert into staff_pay(user_id, monthly_salary) values ('00000000-0000-0000-0000-00000000000c', 30000);
+select 'auto cost/hour (30000 / (6d x 9h x 52/12))' t, cost_per_hour from staff_pay where user_id='00000000-0000-0000-0000-00000000000c';
+select pg_temp.as_user('00000000-0000-0000-0000-00000000000b');
+select 'marketer sees designer salary (0)' t, count(*) from staff_pay where user_id='00000000-0000-0000-0000-00000000000c';
+select 'marketer gets cost rate only' t, * from staff_cost_rates();
+reset role;
+select pg_temp.as_user('00000000-0000-0000-0000-00000000000c');
+select 'designer sees own salary (1)' t, count(*) from staff_pay;
+reset role;
+-- Administrator role cannot be stripped, last admin cannot be disabled
+update roles set permissions='{}' where key='admin';
+select 'admin perms kept' t, permissions from roles where key='admin';
+do $$ begin begin update profiles set active=false where email='admin@aq.test'; raise exception 'FAIL last admin disabled';
+  exception when raise_exception then if sqlerrm like 'FAIL%' then raise; end if; raise notice 'ok: %', sqlerrm; end; end $$;
 select 'ALL TESTS PASSED' as result;

@@ -1,8 +1,9 @@
+import { DEFAULT_ROLES } from './permissions'
 // In-browser demo backend: mimics the subset of supabase-js the app uses, plus the
 // database triggers/RPCs from supabase/schema.sql, on sample data kept in localStorage.
 // Only used when the app is built with VITE_DEMO=1.
 
-const KEY = 'aqlyon-erp-demo-v2'
+const KEY = 'aqlyon-erp-demo-v4'
 const SKEY = 'aqlyon-erp-demo-session'
 const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : 'id-' + Math.random().toString(36).slice(2) + Date.now().toString(36))
 const nowISO = () => new Date().toISOString()
@@ -27,8 +28,29 @@ export function resetDemo() { try { localStorage.removeItem(KEY) } catch { /* ig
 
 const T = (name) => (db[name] ||= [])
 const uid = () => currentUser?.id || null
-const roleOf = (id) => T('profiles').find((p) => p.id === id)?.role
-const myRole = () => roleOf(uid())
+const permsOf = (id) => { const p = T('profiles').find((x) => x.id === id); return (p?.active && T('roles').find((r) => r.id === p.role_id)?.permissions) || [] }
+const hasPerm = (...want) => { const p = permsOf(uid()); return !currentUser ? true : p.includes('*') || want.some((w) => p.includes(w)) }
+const myRoleId = () => T('profiles').find((p) => p.id === uid())?.role_id
+// table → permissions needed to read / write (mirrors the database security rules)
+const READ = {
+  leads: ['leads.view', 'leads.manage'], interactions: ['leads.view', 'leads.manage', 'clients.manage'],
+  packages: ['packages.view', 'packages.manage', 'invoices.manage'], projects: ['projects.view', 'projects.manage', 'tasks.view', 'tasks.work', 'tasks.manage'],
+  content_posts: ['calendar.view', 'calendar.manage'], approval_links: ['calendar.manage', 'clients.manage'],
+  quotations: ['quotations.view', 'quotations.manage'], invoices: ['invoices.view', 'invoices.manage', 'payments.manage'], v_invoice_status: ['invoices.view', 'invoices.manage', 'payments.manage'],
+  payments: ['payments.manage', 'invoices.view', 'invoices.manage', 'reports.finance'], expenses: ['expenses.manage', 'payments.manage', 'reports.finance', 'reports.clients'],
+  suppliers: ['suppliers.view', 'suppliers.manage', 'suppliers.pay', 'expenses.manage', 'payments.manage', 'reports.finance'], supplier_bills: ['suppliers.view', 'suppliers.manage', 'suppliers.pay', 'reports.finance', 'reports.clients'],
+  supplier_bill_allocations: ['suppliers.view', 'suppliers.manage', 'suppliers.pay', 'reports.clients', 'invoices.view'],
+  supplier_payments: ['suppliers.view', 'suppliers.pay', 'payments.manage', 'reports.finance', 'invoices.view'],
+  clients: ['clients.view', 'clients.manage', 'tasks.view', 'tasks.work', 'invoices.view', 'quotations.view', 'calendar.view', 'suppliers.view', 'leads.manage']
+}
+const WRITE = {
+  leads: ['leads.manage'], interactions: ['leads.manage', 'clients.manage'], clients: ['clients.manage', 'leads.manage'], packages: ['packages.manage'],
+  projects: ['projects.manage'], design_tasks: ['tasks.manage', 'tasks.review', 'tasks.work'], content_posts: ['calendar.manage'], approval_links: ['calendar.manage', 'clients.manage'],
+  quotations: ['quotations.manage'], invoices: ['invoices.manage', 'payments.manage'], payments: ['payments.manage'], expenses: ['expenses.manage'],
+  suppliers: ['suppliers.manage', 'expenses.manage'], supplier_bills: ['suppliers.manage'], supplier_bill_allocations: ['suppliers.manage'], supplier_payments: ['suppliers.pay'],
+  roles: ['team.manage'], staff_pay: ['team.manage'], settings: ['settings.manage'], services: ['settings.manage', 'quotations.manage', 'invoices.manage']
+}
+const canWrite = (t) => !WRITE[t] || hasPerm(...WRITE[t])
 const settings = () => T('settings')[0]
 const seq = (name) => { db._seq ||= {}; db._seq[name] = (db._seq[name] || 0) + 1; return db._seq[name] }
 
@@ -54,7 +76,9 @@ const DEFAULTS = {
   notifications: () => ({ read: false }),
   activity_log: () => ({ actor_id: uid() }),
   services: () => ({ category: 'Design', unit: 'per item', rate: 0, active: true }),
-  profiles: () => ({ role: 'designer', cost_per_hour: 0, weekly_hours: 48, active: true }),
+  profiles: () => ({ weekly_hours: 54, work_days: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'], work_start: '09:30', work_end: '18:30', active: true }),
+  roles: () => ({ color: 'blue', permissions: [], is_system: false }),
+  staff_pay: () => ({ monthly_salary: 0, cost_per_hour: 0 }),
   suppliers: () => ({ category: 'Freelance Designer', active: true, created_by: uid() }),
   supplier_bills: () => ({ order_date: iso(new Date()), items: [], discount: 0, amount_paid: 0, work_status: 'ordered', status: 'unpaid', created_by: uid() }),
   supplier_bill_allocations: () => ({}),
@@ -81,6 +105,21 @@ function syncInvoice(invId) {
     else if (['paid', 'partial'].includes(inv.status)) inv.status = 'sent'
   }
 }
+function expensePayee(r) {
+  if (r.supplier_id) { r.vendor = T('suppliers').find((x) => x.id === r.supplier_id)?.name || r.vendor; return }
+  const name = String(r.vendor || '').trim(); if (!name) return
+  let sup = T('suppliers').find((x) => x.name.toLowerCase() === name.toLowerCase())
+  if (!sup) { sup = { id: uuid(), name, category: PAYEE_CAT[r.category] || 'Other', active: true, created_at: nowISO() }; T('suppliers').push(sup) }
+  r.supplier_id = sup.id; r.vendor = sup.name
+}
+const PAYEE_CAT = { Rent: 'Landlord', Salary: 'Staff', 'Internet / Phone': 'Utility', 'Electricity / Water': 'Utility', 'Software / Subscriptions': 'Software / Subscription',
+  'Stock Images / Assets': 'Software / Subscription', 'Ad Spend (Client)': 'Ad Platform' }
+function payCalc(r) {
+  const p = T('profiles').find((x) => x.id === r.user_id)
+  const [h1, m1] = String(p?.work_start || '09:30').split(':').map(Number), [h2, m2] = String(p?.work_end || '18:30').split(':').map(Number)
+  const monthly = (p?.work_days?.length || 6) * Math.max(1, (h2 * 60 + m2 - h1 * 60 - m1) / 60) * 52 / 12
+  if (Number(r.monthly_salary) > 0) r.cost_per_hour = Math.round((Number(r.monthly_salary) / monthly) * 100) / 100
+}
 function syncBill(billId) {
   const b = T('supplier_bills').find((x) => x.id === billId); if (!b) return
   const paid = T('supplier_payments').filter((p) => p.bill_id === billId).reduce((a, p) => a + Number(p.amount), 0)
@@ -88,14 +127,15 @@ function syncBill(billId) {
   if (b.status !== 'cancelled') b.status = paid >= b.total && b.total > 0 ? 'paid' : paid > 0 ? 'partial' : 'unpaid'
 }
 function guardDesigner(table, oldR, newR) {
-  if (myRole() !== 'designer') return
+  if (table === 'design_tasks' && hasPerm('tasks.manage')) return
+  if (table === 'task_proofs' && hasPerm('tasks.review')) return
   if (table === 'design_tasks') {
-    if (newR.status !== oldR.status && !['todo', 'in_progress', 'internal_review'].includes(newR.status)) throw new Error('Designers can only set status to To do, In progress or Ready for review')
+    if (newR.status !== oldR.status && !['todo', 'in_progress', 'internal_review'].includes(newR.status) && !hasPerm('tasks.review')) throw new Error('You can only set status to To do, In progress or Ready for review')
     for (const k of ['title', 'client_id', 'due_date', 'priority', 'brief', 'max_revisions'])
-      if (k in newR && JSON.stringify(newR[k]) !== JSON.stringify(oldR[k])) throw new Error('Designers cannot edit the brief, client, due date or priority — raise a query instead')
+      if (k in newR && JSON.stringify(newR[k]) !== JSON.stringify(oldR[k])) throw new Error('You cannot edit the brief, client, due date or priority — raise a query instead')
   }
   if (table === 'task_proofs' && (newR.status !== oldR.status || newR.review_note !== oldR.review_note || newR.client_decision !== oldR.client_decision))
-    throw new Error('Only marketers or admins can review proofs')
+    throw new Error('You do not have permission to review proofs')
 }
 function setTaskStatus(t, status) {
   if (!t || t.status === status) return
@@ -111,12 +151,14 @@ function beforeInsert(table, r) {
   if (table === 'clients' && !r.code) r.code = 'CL-' + String(seq('client')).padStart(3, '0')
   if (table === 'task_proofs') r.version = Math.max(0, ...T('task_proofs').filter((p) => p.task_id === r.task_id).map((p) => p.version)) + 1
   if (table === 'payments' && !r.client_id && r.invoice_id) r.client_id = T('invoices').find((i) => i.id === r.invoice_id)?.client_id
+  if (table === 'staff_pay') payCalc(r)
+  if (table === 'expenses') expensePayee(r)
   if (table === 'supplier_bills') {
     if (!r.number) r.number = `${st.po_prefix || 'AQB-PO'}-${String(r.order_date).slice(0, 4)}-${String(seq('po')).padStart(4, '0')}`
     totals(r); if (r.work_status === 'received' && !r.received_on) r.received_on = iso(new Date())
   }
   if (table === 'supplier_payments') {
-    if (myRole() === 'marketer' || myRole() === 'designer') throw new Error('Only Finance or Admin can record supplier payments')
+    if (!hasPerm('suppliers.pay')) throw new Error('You do not have permission to pay suppliers')
     if (r.bill_id) r.supplier_id = T('supplier_bills').find((b) => b.id === r.bill_id)?.supplier_id
   }
 }
@@ -130,7 +172,7 @@ function afterInsert(table, r) {
   if (table === 'supplier_payments') syncBill(r.bill_id)
   if (table === 'queries') {
     if (r.to_user) notify(r.to_user, `New query: ${r.subject}`, (r.body || '').slice(0, 140), `/queries/${r.id}`)
-    else if (r.to_role) T('profiles').filter((p) => p.role === r.to_role && p.active).forEach((p) => notify(p.id, `New query: ${r.subject}`, (r.body || '').slice(0, 140), `/queries/${r.id}`))
+    else if (r.to_role_id) T('profiles').filter((p) => p.role_id === r.to_role_id && p.active).forEach((p) => notify(p.id, `New query: ${r.subject}`, (r.body || '').slice(0, 140), `/queries/${r.id}`))
   }
   if (table === 'query_replies') {
     const q = T('queries').find((x) => x.id === r.query_id); if (!q) return
@@ -157,6 +199,13 @@ function afterTaskUpdate(old, t) {
 function afterUpdate(table, old, r) {
   if (['leads', 'clients', 'design_tasks', 'queries', 'content_posts'].includes(table)) r.updated_at = nowISO()
   if (table === 'invoices' || table === 'quotations') totals(r)
+  if (table === 'staff_pay') payCalc(r)
+  if (table === 'expenses' && (r.supplier_id !== old.supplier_id || r.vendor !== old.vendor)) expensePayee(r)
+  if (table === 'roles' && old.key === 'admin') { r.permissions = ['*']; r.key = 'admin' }
+  if (table === 'profiles') {
+    const admins = T('profiles').filter((p) => p.active && T('roles').find((x) => x.id === p.role_id)?.key === 'admin')
+    if (!admins.length) { Object.assign(r, old); throw new Error('At least one active Administrator is required') }
+  }
   if (table === 'design_tasks') afterTaskUpdate(old, r)
   if (table === 'task_proofs') {
     const t = T('design_tasks').find((x) => x.id === r.task_id)
@@ -221,11 +270,14 @@ function view(name) {
   return T(name)
 }
 function visible(table, rows) {
-  const me = uid(), role = myRole()
+  const me = uid()
+  if (!currentUser) return rows
+  if (READ[table] && !hasPerm(...READ[table])) return []
+  if (table === 'staff_pay') return hasPerm('team.manage') ? rows : rows.filter((r) => r.user_id === me)
   if (table === 'notifications') return rows.filter((r) => r.user_id === me)
-  if (table.startsWith('supplier') && role === 'designer') return []
-  if (table === 'queries') return rows.filter((r) => role === 'admin' || r.from_user === me || r.to_user === me || r.to_role === role)
-  if (table === 'time_logs') return rows.filter((r) => r.user_id === me || ['admin', 'marketer'].includes(role))
+  if (table === 'queries') return rows.filter((r) => hasPerm('*') && permsOf(me).includes('*') || r.from_user === me || r.to_user === me || (r.to_role_id && r.to_role_id === myRoleId()))
+  if (table === 'design_tasks' && !hasPerm('tasks.view', 'tasks.manage', 'tasks.review')) return hasPerm('tasks.work') ? rows.filter((r) => r.assignee_id === me || !r.assignee_id) : []
+  if (table === 'time_logs') return rows.filter((r) => r.user_id === me || hasPerm('timesheet.all', 'reports.team', 'reports.clients'))
   return rows
 }
 
@@ -295,11 +347,13 @@ class Query {
         if (this.lim) rows = rows.slice(0, this.lim)
         return this.finish(clone(this.shape(rows, this.sel)))
       }
+      if (this.op !== 'select' && !canWrite(t)) throw new Error('You do not have permission to do that')
       if (this.op === 'insert' || this.op === 'upsert') {
         const list = Array.isArray(this.payload) ? this.payload : [this.payload]
         const out = []
         for (const v of list) {
           if (this.op === 'upsert' && v.id) { const ex = T(t).find((r) => r.id === v.id); if (ex) { Object.assign(ex, v); out.push(ex); continue } }
+          if (this.op === 'upsert' && t === 'staff_pay') { const ex = T(t).find((r) => r.user_id === v.user_id); if (ex) { Object.assign(ex, v); payCalc(ex); out.push(ex); continue } }
           const r = { ...(DEFAULTS[t]?.() || {}), ...Object.fromEntries(Object.entries(v).filter(([, x]) => x !== undefined)) }
           r.id ||= uuid(); r.created_at ||= nowISO()
           beforeInsert(t, r); T(t).push(r); afterInsert(t, r); out.push(r)
@@ -320,6 +374,10 @@ class Query {
       }
       if (this.op === 'delete') {
         const kill = new Set(this.match(visible(t, T(t))).map((r) => r.id))
+        if (t === 'roles') for (const id of kill) {
+          if (T('roles').find((r) => r.id === id)?.key === 'admin') throw new Error('The Administrator role cannot be deleted')
+          if (T('profiles').some((p) => p.role_id === id)) throw new Error('Move the users on this role to another role before deleting it')
+        }
         db[t] = T(t).filter((r) => !kill.has(r.id))
         if (t === 'design_tasks') { db.task_proofs = T('task_proofs').filter((p) => !kill.has(p.task_id)); db.task_comments = T('task_comments').filter((p) => !kill.has(p.task_id)) }
         if (t === 'invoices') db.payments = T('payments').filter((p) => !kill.has(p.invoice_id))
@@ -339,6 +397,7 @@ class Query {
 function rpc(name, a) {
   if (!db) load()
   try {
+    if (name === 'staff_cost_rates') return { data: hasPerm('team.manage', 'reports.clients', 'reports.team') ? T('staff_pay').map((x) => ({ user_id: x.user_id, cost_per_hour: x.cost_per_hour })) : [], error: null }
     if (name === 'convert_lead') {
       const l = T('leads').find((x) => x.id === a.p_lead); if (!l) throw new Error('Lead not found')
       if (l.converted_client_id) return { data: l.converted_client_id, error: null }
@@ -437,7 +496,9 @@ export async function demoApi(name, body) {
   if (name === 'admin-users' && body.action === 'create') {
     if (T('profiles').some((p) => p.email === body.email)) throw new Error('A user with this email already exists')
     const id = uuid()
-    T('profiles').push({ id, email: body.email, full_name: body.full_name, role: body.role, active: true, created_at: nowISO(), ...body.profile })
+    if (!T('roles').some((r) => r.id === body.role_id)) throw new Error('Choose a role')
+    T('profiles').push({ ...DEFAULTS.profiles(), id, email: body.email, full_name: body.full_name, role_id: body.role_id, active: true, created_at: nowISO(), ...body.profile })
+    if (Number(body.monthly_salary) > 0) { const sp = { user_id: id, monthly_salary: Number(body.monthly_salary), cost_per_hour: 0 }; payCalc(sp); T('staff_pay').push(sp) }
     db._pw[id] = body.password
     persist(); return { ok: true }
   }
@@ -456,11 +517,16 @@ export const demoFileUrls = (ids) => Object.fromEntries(ids.map((id) => [id, fil
 /* ---------------------------- seed ---------------------------- */
 function seed() {
   db = { _seq: {} }
-  const P = (id, email, full_name, role, designation, cost) => ({ id, email, full_name, role, designation, cost_per_hour: cost, weekly_hours: 48, active: true, created_at: ago(2000) })
+  db.roles = DEFAULT_ROLES.map((r) => ({ id: 'role-' + r.key, key: r.key, name: r.name, description: r.description, color: r.color, permissions: r.permissions, is_system: !!r.is_system, created_at: ago(3000) }))
+  const P = (id, email, full_name, role, designation, salary) => ({ id, email, full_name, role_id: 'role-' + role, designation, weekly_hours: 54, work_days: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'],
+    work_start: '09:30', work_end: '18:30', joined_on: day(-400), active: true, created_at: ago(2000), _salary: salary })
   const ad = 'u-admin', mk = 'u-mkt', d1 = 'u-arjun', d2 = 'u-fathima', fn = 'u-fin'
-  db.profiles = [P(ad, 'nabeel@aqlyon.demo', 'Nabeel Narangoli', 'admin', 'Managing Director', 600), P(mk, 'shahana@aqlyon.demo', 'Shahana K', 'marketer', 'Digital Marketing Executive', 220),
-    P(d1, 'arjun@aqlyon.demo', 'Arjun Das', 'designer', 'Senior Graphic Designer', 200), P(d2, 'fathima@aqlyon.demo', 'Fathima Rinsha', 'designer', 'Graphic Designer & Video Editor', 160),
-    P(fn, 'rahul@aqlyon.demo', 'Rahul M', 'finance', 'Accounts', 180)]
+  db.profiles = [P(ad, 'nabeel@aqlyon.demo', 'Nabeel Narangoli', 'admin', 'Managing Director', 0), P(mk, 'shahana@aqlyon.demo', 'Shahana K', 'marketer', 'Digital Marketing Executive', 28000),
+    P(d1, 'arjun@aqlyon.demo', 'Arjun Das', 'designer', 'Senior Graphic Designer', 25000), P(d2, 'fathima@aqlyon.demo', 'Fathima Rinsha', 'designer', 'Graphic Designer & Video Editor', 20000),
+    P(fn, 'rahul@aqlyon.demo', 'Rahul M', 'finance', 'Accounts', 22000)]
+  db.staff_pay = db.profiles.filter((p) => p._salary).map((p) => { const r = { user_id: p.id, monthly_salary: p._salary, cost_per_hour: 0 }; return r })
+  db.profiles.forEach((p) => delete p._salary)
+  db.staff_pay.forEach(payCalc)
   db.settings = [{ id: 1, company_name: 'Aqlyon Brand Management', address: 'First Floor, Muhyiddin Building, behind Municipal Shopping Complex, Koyilandy, Keralam 673305, India',
     phone: '+91 70341 42256', email: 'hello@aqlyondm.com', website: 'www.aqlyondm.com', currency: 'INR', invoice_prefix: 'AQB-INV', quote_prefix: 'AQB-QT', po_prefix: 'AQB-PO', task_prefix: 'DT',
     bank_details: 'Aqlyon Brand Management\nYour Bank, Koyilandy branch\nA/c XXXX XXXX 1234\nIFSC XXXX0001234', upi_id: 'aqlyonbrand@upi',
@@ -584,7 +650,7 @@ function seed() {
   for (const [u, t, d, m, note] of [[d1, t1, -1, 90, 'Concepts + photo retouch'], [d1, t3, -2, 180, 'Carousel layout'], [d1, t3, -1, 120, 'Gold foil texture'], [d2, t4, -2, 75, 'Ad v1'], [d2, t5, -3, 60, 'Tips post'], [d1, t6, -7, 200, 'Flyer + print file'], [d2, t4, 0, 40, 'Revision work'], [mk, null, -1, 90, 'Client meetings']]) {
     as(u); ins('time_logs', { user_id: u, task_id: t?.id || null, client_id: t?.client_id || null, log_date: day(d), minutes: m, note, billable: !!t })
   }
-  as(d1); ins('queries', { subject: 'Malabar Bakes: need product photos', body: 'Can we get fresh photos of the plum cake? Current ones are low resolution.', category: 'Files / Access', to_role: 'marketer', client_id: c1.id })
+  as(d1); ins('queries', { subject: 'Malabar Bakes: need product photos', body: 'Can we get fresh photos of the plum cake? Current ones are low resolution.', category: 'Files / Access', to_role_id: 'role-marketer', client_id: c1.id })
   currentUser = prev
   return db
 }

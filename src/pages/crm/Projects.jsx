@@ -12,7 +12,7 @@ import {
 } from '../../components/ui'
 
 export default function Projects() {
-  const { can } = useAuth()
+  const { has } = useAuth()
   const [editing, setEditing] = useState(null)
   const [search, setSearch] = useState('')
   const [status, setStatus] = useState('')
@@ -25,7 +25,7 @@ export default function Projects() {
   return (
     <>
       <PageHeader title="Campaigns & Projects" subtitle={`${active.length} active · ${money(spend)} ad spend · ${n(leads)} leads generated (${leads ? money(spend / leads) : '—'} per lead)`}
-        actions={can('marketer') && <Button icon={Plus} onClick={() => setEditing({})}>New campaign</Button>} />
+        actions={has('projects.manage') && <Button icon={Plus} onClick={() => setEditing({})}>New campaign</Button>} />
       <div className="filters">
         <SearchInput value={search} onChange={setSearch} />
         <Select options={PROJECT_STATUS} value={status} onChange={(v) => setStatus(v || '')} placeholder="All statuses" />
@@ -45,7 +45,7 @@ export default function Projects() {
             </tr>))}
           </tbody></table></div>
       )}
-      {editing && <ProjectModal project={editing} readOnly={!can('marketer')} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); reload() }} />}
+      {editing && <ProjectModal project={editing} readOnly={!has('projects.manage')} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); reload() }} />}
     </>
   )
 }
@@ -85,7 +85,7 @@ export function ProjectModal({ project, onClose, onSaved, readOnly }) {
           <Field label="Status"><Select placeholder={false} options={PROJECT_STATUS} value={f.status} onChange={set('status')} /></Field>
           <Field label="Start"><Input type="date" value={f.start_date} onChange={set('start_date')} /></Field>
           <Field label="End"><Input type="date" value={f.end_date} onChange={set('end_date')} /></Field>
-          <Field label="Owner"><MemberSelect roles={['admin', 'marketer']} value={f.owner_id} onChange={set('owner_id')} /></Field>
+          <Field label="Owner"><MemberSelect perm={['leads.manage', 'clients.manage']} value={f.owner_id} onChange={set('owner_id')} /></Field>
           <Field label="Objective" span={3}><Input value={f.objective} onChange={set('objective')} placeholder="Leads, awareness, store visits, sales…" /></Field>
           <Field label="Agency fee (₹)"><Input type="number" min="0" value={f.budget} onChange={set('budget')} /></Field>
           <Field label="Ad spend (₹)"><Input type="number" min="0" value={f.ad_spend} onChange={set('ad_spend')} /></Field>

@@ -1,4 +1,6 @@
 import { useMemo, useRef, useState } from 'react'
+import { Link } from 'react-router-dom'
+import { SupplierModal } from './Suppliers'
 import { Plus, Download, Receipt, Paperclip, Trash2, Repeat } from 'lucide-react'
 import { supabase, q, uploadFile, signedUrl } from '../../lib/supabase'
 import { useData } from '../../lib/hooks'
@@ -19,6 +21,9 @@ export default function Expenses() {
   const { data, loading, reload } = useData(() => q(supabase.from('expenses').select('*, clients(name)').gte('spent_on', from).lte('spent_on', to).order('spent_on', { ascending: false })), [from, to], [])
   const rows = useMemo(() => data.filter((e) => !cat || e.category === cat), [data, cat])
   const total = rows.reduce((a, e) => a + Number(e.amount), 0)
+  const byPayee = useMemo(() => Object.values(data.filter((e) => e.supplier_id).reduce((a, e) => {
+    const k = e.supplier_id; a[k] ||= { id: k, name: e.vendor, total: 0, n: 0 }; a[k].total += Number(e.amount); a[k].n++; return a
+  }, {})).sort((a, b) => b.total - a.total), [data])
   const byCat = useMemo(() => Object.entries(data.reduce((a, e) => ({ ...a, [e.category]: (a[e.category] || 0) + Number(e.amount) }), {})).sort((a, b) => b[1] - a[1]), [data])
   const all = data.reduce((a, e) => a + Number(e.amount), 0)
   const rebill = data.filter((e) => e.rebillable).reduce((a, e) => a + Number(e.amount), 0)
@@ -34,7 +39,7 @@ export default function Expenses() {
     if (!rec.length) { await confirm('No recurring expenses were found last month. Tick “Recurring monthly” on rent, salaries, subscriptions etc.', { okText: 'OK' }); return }
     if (!(await confirm(`Copy ${rec.length} recurring expense(s) from last month into ${new Date(from).toLocaleDateString('en-IN', { month: 'long' })}?`, { okText: 'Copy' }))) return
     run(async () => {
-      await q(supabase.from('expenses').insert(rec.map((e) => ({ spent_on: from, category: e.category, vendor: e.vendor, description: e.description, amount: e.amount, method: e.method, client_id: e.client_id, rebillable: e.rebillable, recurring: true }))))
+      await q(supabase.from('expenses').insert(rec.map((e) => ({ spent_on: from, category: e.category, vendor: e.vendor, description: e.description, amount: e.amount, method: e.method, client_id: e.client_id, rebillable: e.rebillable, recurring: true, supplier_id: e.supplier_id }))))
       reload()
     }, 'Recurring expenses added')
   }
@@ -66,7 +71,7 @@ export default function Expenses() {
                 <tr key={e.id} className="click" onClick={() => setEditing(e)}>
                   <td className="nowrap">{date(e.spent_on)}</td>
                   <td><div>{e.category}</div>{e.recurring && <Badge tone="slate">Recurring</Badge>}</td>
-                  <td><div className="cell-title">{e.vendor || e.description || '—'}</div><div className="cell-sub">{e.vendor && e.description}{e.clients?.name && ` · for ${e.clients.name}`}{e.rebillable && ' · re-billable'}</div></td>
+                  <td><div className="cell-title">{e.supplier_id ? <Link to={`/finance/suppliers/${e.supplier_id}`} onClick={(ev) => ev.stopPropagation()}>{e.vendor}</Link> : e.vendor || e.description || '—'}</div><div className="cell-sub">{e.vendor && e.description}{e.clients?.name && ` · for ${e.clients.name}`}{e.rebillable && ' · re-billable'}</div></td>
                   <td>{e.method}</td>
                   <td className="num strong">{money2(e.amount)}</td>
                   <td onClick={(ev) => ev.stopPropagation()} className="nowrap">{e.receipt_path && <IconBtn icon={Paperclip} size={14} title="Receipt" onClick={() => openReceipt(e)} />}<IconBtn icon={Trash2} size={14} title="Delete" onClick={() => del(e)} /></td>
@@ -75,6 +80,15 @@ export default function Expenses() {
             </table></div>
           )}
         </div>
+        <div className="grid" style={{ alignContent: 'start' }}>
+        <Card title="By payee" actions={<Link className="btn btn-ghost btn-sm" to="/finance/suppliers">All payees</Link>}>
+          {byPayee.length === 0 ? <p className="faint small">No data.</p> : byPayee.slice(0, 10).map((x) => (
+            <Link key={x.id} to={`/finance/suppliers/${x.id}`} style={{ display: 'block', marginBottom: 10, color: 'inherit', textDecoration: 'none' }}>
+              <div className="row between small"><span className="strong" style={{ color: 'var(--green-d)' }}>{x.name}</span><b>{money(x.total)}</b></div>
+              <Progress value={x.total} max={byPayee[0].total} />
+            </Link>
+          ))}
+        </Card>
         <Card title="By category">
           {byCat.length === 0 ? <p className="faint small">No data.</p> : byCat.map(([k, v]) => (
             <div key={k} style={{ marginBottom: 10, cursor: 'pointer' }} onClick={() => setCat(cat === k ? '' : k)}>
@@ -83,6 +97,7 @@ export default function Expenses() {
             </div>
           ))}
         </Card>
+        </div>
       </div>
       {editing && <ExpenseModal exp={editing} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); reload() }} />}
     </>
@@ -91,12 +106,15 @@ export default function Expenses() {
 
 function ExpenseModal({ exp, onClose, onSaved }) {
   const isNew = !exp.id
-  const [f, set] = useForm({ spent_on: todayISO(), category: 'Office Supplies', vendor: '', description: '', amount: '', method: 'UPI', client_id: '', rebillable: false, recurring: false, ...exp })
+  const [f, set] = useForm({ spent_on: todayISO(), category: 'Office Supplies', supplier_id: '', description: '', amount: '', method: 'UPI', client_id: '', rebillable: false, recurring: false, ...exp })
+  const [addPayee, setAddPayee] = useState(false)
+  const payees = useData(() => q(supabase.from('suppliers').select('id,name,category').eq('active', true).order('name')), [addPayee], [])
   const [file, setFile] = useState(null)
   const inp = useRef()
   const [busy, run] = useAction()
   const save = (e) => { e.preventDefault(); run(async () => {
-    const p = { spent_on: f.spent_on, category: f.category, vendor: f.vendor || null, description: f.description || null, amount: Number(f.amount), method: f.method, client_id: f.client_id || null, rebillable: !!f.rebillable, recurring: !!f.recurring }
+    if (!f.supplier_id) throw new Error('Choose who you paid (or add a new payee with +)')
+    const p = { spent_on: f.spent_on, category: f.category, supplier_id: f.supplier_id, description: f.description || null, amount: Number(f.amount), method: f.method, client_id: f.client_id || null, rebillable: !!f.rebillable, recurring: !!f.recurring }
     if (!(p.amount > 0)) throw new Error('Enter amount')
     if (file) p.receipt_path = await uploadFile('receipts', file, f.spent_on.slice(0, 7))
     isNew ? await q(supabase.from('expenses').insert(p)) : await q(supabase.from('expenses').update(p).eq('id', exp.id))
@@ -110,7 +128,10 @@ function ExpenseModal({ exp, onClose, onSaved }) {
         <Field label="Amount (₹)" required><Input type="number" min="0" step="any" required value={f.amount} onChange={set('amount')} /></Field>
         <Field label="Category"><Select placeholder={false} options={EXPENSE_CATEGORIES} value={f.category} onChange={set('category')} /></Field>
         <Field label="Paid via"><Select placeholder={false} options={PAYMENT_METHODS} value={f.method} onChange={set('method')} /></Field>
-        <Field label="Vendor / paid to"><Input value={f.vendor} onChange={set('vendor')} placeholder="Adobe, KSEB, Landlord…" /></Field>
+        <Field label="Vendor / paid to" required>
+          <div className="row gap-xs"><Select options={payees.data.map((x) => ({ id: x.id, label: `${x.name} · ${x.category}` }))} value={f.supplier_id} onChange={set('supplier_id')} placeholder="Choose payee…" />
+            <IconBtn icon={Plus} title="Add new payee" onClick={() => setAddPayee(true)} /></div>
+        </Field>
         <Field label="For client (optional)"><ClientSelect value={f.client_id} onChange={set('client_id')} placeholder="Agency expense" includeInactive /></Field>
         <Field label="Description" span={2}><Textarea rows={2} value={f.description} onChange={set('description')} /></Field>
         <Field label="Receipt / bill" span={2}>
@@ -120,6 +141,11 @@ function ExpenseModal({ exp, onClose, onSaved }) {
         <label className="check"><input type="checkbox" checked={!!f.recurring} onChange={(e) => set('recurring')(e.target.checked)} />Recurring monthly</label>
         <label className="check"><input type="checkbox" checked={!!f.rebillable} onChange={(e) => set('rebillable')(e.target.checked)} />Re-bill to client</label>
       </form>
+      {addPayee && <SupplierModal supplier={{ category: CATEGORY_TO_PAYEE[f.category] || 'Other' }} onClose={() => setAddPayee(false)} onSaved={(row) => { setAddPayee(false); set('supplier_id')(row.id) }} />}
     </Modal>
   )
 }
+
+const CATEGORY_TO_PAYEE = { Rent: 'Landlord', Salary: 'Staff', 'Electricity / Water': 'Utility', 'Internet / Phone': 'Utility', 'Software / Subscriptions': 'Software / Subscription',
+  'Ad Spend (Client)': 'Ad Platform', 'Own Marketing': 'Ad Platform', 'Stock Images / Assets': 'Software / Subscription', Printing: 'Printing Press', Freelancer: 'Freelance Designer',
+  'Bank Charges / Fees': 'Bank / Government', 'Travel / Fuel': 'Other', 'Office Supplies': 'Shop / Store', Equipment: 'Shop / Store', Maintenance: 'Other' }

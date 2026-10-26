@@ -55,7 +55,7 @@ export default function FollowUps() {
   return (
     <>
       <PageHeader title="Follow-ups" subtitle="Every promised call-back, quote and check-in — so no client or lead goes cold."
-        actions={<MemberSelect roles={['admin', 'marketer']} value={who} onChange={(v) => setWho(v || '')} placeholder="Everyone" />} />
+        actions={<MemberSelect perm={['leads.manage', 'clients.manage']} value={who} onChange={(v) => setWho(v || '')} placeholder="Everyone" />} />
       <div className="stats">
         <Stat label="Due today or overdue" value={due.length} icon={PhoneCall} tone={due.length ? 'red' : 'green'} onClick={() => setTab('due')} />
         <Stat label="Upcoming" value={upcoming.length} icon={CalendarClock} tone="blue" onClick={() => setTab('upcoming')} />

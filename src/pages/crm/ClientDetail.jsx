@@ -22,7 +22,7 @@ import { MoneyFlow } from '../finance/Suppliers'
 export default function ClientDetail() {
   const { id } = useParams()
   const nav = useNavigate()
-  const { can } = useAuth()
+  const { has } = useAuth()
   const [tab, setTab] = useState('overview')
   const [editing, setEditing] = useState(false)
   const { data: c, loading, error, reload } = useData(() => q(supabase.from('clients').select('*').eq('id', id).single()), [id])
@@ -30,12 +30,12 @@ export default function ClientDetail() {
   if (error) return <ErrorBox error={error} />
   const tabs = [
     { id: 'overview', label: 'Overview' },
-    can('marketer') && { id: 'log', label: 'Conversations' },
-    can('marketer', 'designer') && { id: 'tasks', label: 'Design tasks' },
-    can('marketer', 'designer') && { id: 'projects', label: 'Campaigns' },
-    can('marketer', 'finance') && { id: 'packages', label: 'Packages' },
-    can('marketer', 'finance') && { id: 'invoices', label: 'Invoices & money flow' },
-    can('marketer') && { id: 'links', label: 'Client approval links' }
+    has('leads.manage', 'clients.manage') && { id: 'log', label: 'Conversations' },
+    has('tasks.view', 'tasks.work', 'tasks.manage') && { id: 'tasks', label: 'Design tasks' },
+    has('projects.view', 'projects.manage') && { id: 'projects', label: 'Campaigns' },
+    has('packages.view', 'packages.manage') && { id: 'packages', label: 'Packages' },
+    has('invoices.view', 'invoices.manage') && { id: 'invoices', label: 'Invoices & money flow' },
+    has('calendar.manage', 'clients.manage') && { id: 'links', label: 'Client approval links' }
   ].filter(Boolean)
 
   return (
@@ -49,7 +49,7 @@ export default function ClientDetail() {
         <div className="page-actions">
           {c.phone && <a className="btn btn-outline" href={`tel:${c.phone}`}><Phone size={15} />Call</a>}
           {(c.whatsapp || c.phone) && <a className="btn btn-outline" target="_blank" rel="noreferrer" href={waLink(c.whatsapp || c.phone)}><MessageCircle size={15} />WhatsApp</a>}
-          {can('marketer') && <Button variant="dark" icon={Pencil} onClick={() => setEditing(true)}>Edit</Button>}
+          {has('clients.manage') && <Button variant="dark" icon={Pencil} onClick={() => setEditing(true)}>Edit</Button>}
         </div>
       </div>
       <Tabs tabs={tabs} value={tab} onChange={setTab} />
@@ -66,15 +66,15 @@ export default function ClientDetail() {
 }
 
 function Overview({ c, goTab }) {
-  const { can } = useAuth()
+  const { has } = useAuth()
   const nav = useNavigate()
   const ms = monthStart(), me = monthEnd()
   const { data } = useData(async () => {
     const [packs, tasks, posts, inv] = await Promise.all([
-      can('marketer', 'finance') ? q(supabase.from('packages').select('*').eq('client_id', c.id).eq('status', 'active')) : [],
-      can('marketer', 'designer') ? q(supabase.from('design_tasks').select('id,status,due_date,title,code').eq('client_id', c.id)) : [],
-      can('marketer', 'designer') ? q(supabase.from('content_posts').select('id,status,post_type,publish_date').eq('client_id', c.id).gte('publish_date', ms).lte('publish_date', me)) : [],
-      can('marketer', 'finance') ? q(supabase.from('invoices').select('total,amount_paid,status').eq('client_id', c.id).neq('status', 'cancelled')) : []
+      has('packages.view', 'packages.manage') ? q(supabase.from('packages').select('*').eq('client_id', c.id).eq('status', 'active')) : [],
+      has('tasks.view', 'tasks.work', 'tasks.manage') ? q(supabase.from('design_tasks').select('id,status,due_date,title,code').eq('client_id', c.id)) : [],
+      has('calendar.view', 'calendar.manage') ? q(supabase.from('content_posts').select('id,status,post_type,publish_date').eq('client_id', c.id).gte('publish_date', ms).lte('publish_date', me)) : [],
+      has('invoices.view', 'invoices.manage') ? q(supabase.from('invoices').select('total,amount_paid,status').eq('client_id', c.id).neq('status', 'cancelled')) : []
     ])
     return { packs, tasks, posts, inv }
   }, [c.id], { packs: [], tasks: [], posts: [], inv: [] })
@@ -90,10 +90,10 @@ function Overview({ c, goTab }) {
   return (
     <>
       <div className="stats">
-        {can('marketer', 'designer') && <Stat label="Open design tasks" value={open.length} sub={overdue.length ? `${overdue.length} overdue` : 'None overdue'} icon={Palette} tone={overdue.length ? 'red' : 'green'} onClick={() => goTab('tasks')} />}
-        {can('marketer', 'designer') && <Stat label="Posts planned this month" value={live.length} sub={`${live.filter((p) => p.status === 'published').length} published`} icon={CalendarDays} tone="violet" onClick={() => nav(`/calendar?client=${c.id}`)} />}
-        {can('marketer', 'finance') && <Stat label="Monthly retainer" value={money(data.packs.reduce((a, p) => a + monthly(p), 0))} sub={`${data.packs.length} active package(s)`} icon={Package} tone="teal" onClick={() => goTab('packages')} />}
-        {can('marketer', 'finance') && <Stat label="Outstanding" value={money(due)} sub={`${money(billed)} billed lifetime`} icon={FileText} tone={due > 0 ? 'amber' : 'green'} onClick={() => goTab('invoices')} />}
+        {has('tasks.view', 'tasks.work', 'tasks.manage') && <Stat label="Open design tasks" value={open.length} sub={overdue.length ? `${overdue.length} overdue` : 'None overdue'} icon={Palette} tone={overdue.length ? 'red' : 'green'} onClick={() => goTab('tasks')} />}
+        {has('calendar.view', 'calendar.manage') && <Stat label="Posts planned this month" value={live.length} sub={`${live.filter((p) => p.status === 'published').length} published`} icon={CalendarDays} tone="violet" onClick={() => nav(`/calendar?client=${c.id}`)} />}
+        {has('packages.view', 'packages.manage') && <Stat label="Monthly retainer" value={money(data.packs.reduce((a, p) => a + monthly(p), 0))} sub={`${data.packs.length} active package(s)`} icon={Package} tone="teal" onClick={() => goTab('packages')} />}
+        {has('invoices.view', 'invoices.manage') && <Stat label="Outstanding" value={money(due)} sub={`${money(billed)} billed lifetime`} icon={FileText} tone={due > 0 ? 'amber' : 'green'} onClick={() => goTab('invoices')} />}
       </div>
       <div className="grid g-2-1">
         <div className="grid">
@@ -133,7 +133,7 @@ function Overview({ c, goTab }) {
               <div className="row between small"><span className="muted">Client since</span><span>{date(c.onboarded_on)}</span></div>
             </div>
           </Card>
-          {can('marketer', 'designer') && open.length > 0 && (
+          {has('tasks.view', 'tasks.work', 'tasks.manage') && open.length > 0 && (
             <Card title="Upcoming deliveries">
               <div className="list">
                 {open.sort((a, b) => (a.due_date || '9').localeCompare(b.due_date || '9')).slice(0, 6).map((t) => (
@@ -153,11 +153,11 @@ function Overview({ c, goTab }) {
 
 function ClientTasks({ clientId }) {
   const nav = useNavigate()
-  const { can } = useAuth()
+  const { has } = useAuth()
   const [adding, setAdding] = useState(false)
   const { data, loading, reload } = useData(() => q(supabase.from('design_tasks').select('*').eq('client_id', clientId).order('created_at', { ascending: false })), [clientId], [])
   return (
-    <Card title={`Design tasks (${data.length})`} actions={can('marketer') && <Button size="sm" icon={Plus} onClick={() => setAdding(true)}>New task</Button>} pad={false}>
+    <Card title={`Design tasks (${data.length})`} actions={has('tasks.manage') && <Button size="sm" icon={Plus} onClick={() => setAdding(true)}>New task</Button>} pad={false}>
       {loading ? <Loading /> : data.length === 0 ? <Empty title="No design tasks yet" /> : (
         <div className="table-wrap"><table className="table">
           <thead><tr><th>Task</th><th>Type</th><th>Status</th><th>Designer</th><th>Due</th><th className="num">Revisions</th></tr></thead>
@@ -178,16 +178,16 @@ function ClientTasks({ clientId }) {
 }
 
 function ClientProjects({ clientId }) {
-  const { can } = useAuth()
+  const { has } = useAuth()
   const [editing, setEditing] = useState(null)
   const { data, loading, reload } = useData(() => q(supabase.from('projects').select('*').eq('client_id', clientId).order('created_at', { ascending: false })), [clientId], [])
   return (
-    <Card title="Campaigns & projects" actions={can('marketer') && <Button size="sm" icon={Plus} onClick={() => setEditing({ client_id: clientId })}>New campaign</Button>} pad={false}>
+    <Card title="Campaigns & projects" actions={has('projects.manage') && <Button size="sm" icon={Plus} onClick={() => setEditing({ client_id: clientId })}>New campaign</Button>} pad={false}>
       {loading ? <Loading /> : data.length === 0 ? <Empty icon={Megaphone} title="No campaigns yet" /> : (
         <div className="table-wrap"><table className="table">
           <thead><tr><th>Name</th><th>Type</th><th>Status</th><th>Dates</th><th className="num">Ad spend</th><th className="num">Leads</th></tr></thead>
           <tbody>{data.map((p) => (
-            <tr key={p.id} className="click" onClick={() => can('marketer') && setEditing(p)}>
+            <tr key={p.id} className="click" onClick={() => has('projects.manage') && setEditing(p)}>
               <td><div className="cell-title">{p.name}</div><div className="cell-sub">{p.platform}</div></td>
               <td>{p.type}</td><td><StatusBadge list={PROJECT_STATUS} value={p.status} /></td>
               <td className="nowrap">{p.start_date ? date(p.start_date) : '—'} → {p.end_date ? date(p.end_date) : '—'}</td>
@@ -201,16 +201,16 @@ function ClientProjects({ clientId }) {
 }
 
 function Packages({ clientId }) {
-  const { can } = useAuth()
+  const { has } = useAuth()
   const [editing, setEditing] = useState(null)
   const { data, loading, reload } = useData(() => q(supabase.from('packages').select('*').eq('client_id', clientId).order('start_date', { ascending: false })), [clientId], [])
   return (
     <>
-      <div className="row between mb"><p className="muted">Retainer packages drive monthly invoices and the deliverable targets on the content calendar.</p>{can('marketer') && <Button icon={Plus} onClick={() => setEditing({})}>Add package</Button>}</div>
+      <div className="row between mb"><p className="muted">Retainer packages drive monthly invoices and the deliverable targets on the content calendar.</p>{has('packages.manage') && <Button icon={Plus} onClick={() => setEditing({})}>Add package</Button>}</div>
       {loading ? <Loading /> : data.length === 0 ? <Empty icon={Package} title="No packages yet">Add the client's monthly retainer: fee, posts, reels and stories per month.</Empty> : (
         <div className="grid g2">
           {data.map((p) => (
-            <Card key={p.id} title={p.name} actions={<><Badge tone={p.status === 'active' ? 'green' : 'slate'}>{p.status}</Badge>{can('marketer') && <IconBtn icon={Pencil} title="Edit" onClick={() => setEditing(p)} />}</>}>
+            <Card key={p.id} title={p.name} actions={<><Badge tone={p.status === 'active' ? 'green' : 'slate'}>{p.status}</Badge>{has('packages.manage') && <IconBtn icon={Pencil} title="Edit" onClick={() => setEditing(p)} />}</>}>
               <div className="row between"><span className="stat-value">{money(p.fee)}</span><span className="muted">{byId(BILLING_TYPES, p.billing_type).label}</span></div>
               <div className="grid g4 mt small">
                 <div><div className="muted">Posts</div><b>{p.posts_per_month}</b></div>
@@ -282,11 +282,11 @@ function PackageModal({ pkg, clientId, onClose, onSaved }) {
 
 function ClientInvoices({ clientId }) {
   const nav = useNavigate()
-  const { can } = useAuth()
+  const { has } = useAuth()
   const { data, loading } = useData(() => q(supabase.from('invoices').select('*').eq('client_id', clientId).order('issue_date', { ascending: false })), [clientId], [])
   const due = data.filter((i) => i.status !== 'cancelled').reduce((a, i) => a + Number(i.total) - Number(i.amount_paid), 0)
   return (
-    <Card title={`Invoices · ${money(due)} outstanding`} actions={can('finance') && <Button size="sm" icon={Plus} onClick={() => nav(`/finance/invoices?new=1&client=${clientId}`)}>New invoice</Button>} pad={false}>
+    <Card title={`Invoices · ${money(due)} outstanding`} actions={has('invoices.manage') && <Button size="sm" icon={Plus} onClick={() => nav(`/finance/invoices?new=1&client=${clientId}`)}>New invoice</Button>} pad={false}>
       {loading ? <Loading /> : data.length === 0 ? <Empty title="No invoices yet" /> : (
         <div className="table-wrap"><table className="table">
           <thead><tr><th>Number</th><th>Date</th><th>Due</th><th>Status</th><th className="num">Total</th><th className="num">Balance</th></tr></thead>

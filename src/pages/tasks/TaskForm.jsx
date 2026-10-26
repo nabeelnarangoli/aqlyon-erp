@@ -6,7 +6,7 @@ import { addDays, todayISO } from '../../lib/format'
 import { Modal, Field, Input, Select, Textarea, ClientSelect, Button, useAction, useForm } from '../../components/ui'
 
 export function TaskModal({ task = {}, onClose, onSaved }) {
-  const { settings, team } = useAuth()
+  const { settings, workers } = useAuth()
   const isNew = !task.id
   const [f, set] = useForm({
     client_id: '', project_id: '', title: '', task_type: 'Social Post', platform: 'Instagram', size: '1080×1350 (Portrait)', quantity: 1,
@@ -20,7 +20,7 @@ export function TaskModal({ task = {}, onClose, onSaved }) {
     ])
     return { projects, open }
   }, [f.client_id], { projects: [], open: [] })
-  const designers = team.filter((m) => m.active && ['designer', 'admin'].includes(m.role))
+  const designers = workers
   const workload = (id) => load.data.open.filter((t) => t.assignee_id === id)
   const [busy, run] = useAction()
 

@@ -12,7 +12,7 @@ import {
 } from '../../components/ui'
 
 export const SUPPLIER_CATEGORIES = ['Freelance Designer', 'Printing Press', 'Videographer', 'Photographer', 'Video Editor', 'Developer', 'Content Writer',
-  'Ad Agency', 'Influencer', 'Signage / Fabrication', 'Other']
+  'Ad Agency', 'Ad Platform', 'Influencer', 'Signage / Fabrication', 'Landlord', 'Utility', 'Software / Subscription', 'Staff', 'Shop / Store', 'Bank / Government', 'Other']
 export const WORK_STATUS = [
   { id: 'ordered', label: 'Ordered', tone: 'blue' }, { id: 'in_progress', label: 'In progress', tone: 'violet' },
   { id: 'received', label: 'Work received', tone: 'green' }, { id: 'cancelled', label: 'Cancelled', tone: 'red' }
@@ -32,13 +32,15 @@ export default function Suppliers() {
   const [search, setSearch] = useState('')
   const [editing, setEditing] = useState(null)
   const { data, loading, reload } = useData(async () => {
-    const [sup, bills] = await Promise.all([
+    const [sup, bills, exps] = await Promise.all([
       q(supabase.from('suppliers').select('*').order('name')),
-      q(supabase.from('supplier_bills').select('supplier_id,total,amount_paid,status').neq('status', 'cancelled'))
+      q(supabase.from('supplier_bills').select('supplier_id,total,amount_paid,status').neq('status', 'cancelled')),
+      q(supabase.from('expenses').select('supplier_id,amount').not('supplier_id', 'is', null))
     ])
     return sup.map((s) => {
       const b = bills.filter((x) => x.supplier_id === s.id)
-      return { ...s, orders: b.length, billed: b.reduce((a, x) => a + Number(x.total), 0), paid: b.reduce((a, x) => a + Number(x.amount_paid), 0) }
+      const e = exps.filter((x) => x.supplier_id === s.id).reduce((a, x) => a + Number(x.amount), 0)
+      return { ...s, orders: b.length, billed: b.reduce((a, x) => a + Number(x.total), 0), paid: b.reduce((a, x) => a + Number(x.amount_paid), 0), spent: e }
     })
   }, [], [])
   if (id) return <SupplierDetail id={id} onBack={() => nav('/finance/suppliers')} />
@@ -46,17 +48,17 @@ export default function Suppliers() {
   const owed = data.reduce((a, s) => a + s.billed - s.paid, 0)
   return (
     <>
-      <PageHeader title="Suppliers" subtitle={`${data.length} suppliers · ${money(owed)} payable`}
-        actions={<><Button variant="outline" icon={Truck} onClick={() => nav('/finance/work-orders')}>Work orders</Button><Button icon={Plus} onClick={() => setEditing({})}>Add supplier</Button></>} />
+      <PageHeader title="Suppliers & payees" subtitle={`${data.length} accounts · ${money(owed)} payable to suppliers`}
+        actions={<><Button variant="outline" icon={Truck} onClick={() => nav('/finance/work-orders')}>Work orders</Button><Button icon={Plus} onClick={() => setEditing({})}>Add supplier / payee</Button></>} />
       <div className="filters"><SearchInput value={search} onChange={setSearch} placeholder="Search suppliers…" /></div>
-      {loading ? <Loading /> : rows.length === 0 ? <Empty icon={Truck} title="No suppliers yet">Add the freelancers, printers and videographers you outsource work to.</Empty> : (
+      {loading ? <Loading /> : rows.length === 0 ? <Empty icon={Truck} title="No suppliers or payees yet">Add freelancers and printers you outsource to, and anyone you pay expenses to — landlord, KSEB, Adobe…</Empty> : (
         <div className="card table-wrap"><table className="table">
-          <thead><tr><th>Supplier</th><th>Category</th><th>Contact</th><th className="num">Work orders</th><th className="num">Billed</th><th className="num">Paid</th><th className="num">Payable</th></tr></thead>
+          <thead><tr><th>Supplier / payee</th><th>Category</th><th>Contact</th><th className="num">Work orders</th><th className="num">Expenses</th><th className="num">Total spent</th><th className="num">Payable</th></tr></thead>
           <tbody>{rows.map((s) => (
             <tr key={s.id} className="click" onClick={() => nav(`/finance/suppliers/${s.id}`)}>
               <td><div className="cell-title">{s.name}</div>{!s.active && <Badge tone="slate">Inactive</Badge>}</td>
               <td>{s.category}</td><td><div>{s.contact_person || '—'}</div><div className="cell-sub">{s.phone}</div></td>
-              <td className="num">{s.orders}</td><td className="num">{money(s.billed)}</td><td className="num">{money(s.paid)}</td>
+              <td className="num">{s.orders || '—'}</td><td className="num">{s.spent ? money(s.spent) : '—'}</td><td className="num">{money(s.billed + s.spent)}</td>
               <td className="num strong" style={{ color: s.billed - s.paid > 0 ? 'var(--orange)' : undefined }}>{money(s.billed - s.paid)}</td>
             </tr>))}</tbody>
         </table></div>
@@ -77,10 +79,10 @@ export function SupplierModal({ supplier, onClose, onSaved }) {
     onSaved(row)
   }, 'Supplier saved') }
   return (
-    <Modal open size="md" onClose={onClose} title={isNew ? 'Add supplier' : `Edit ${supplier.name}`}
+    <Modal open size="md" onClose={onClose} title={isNew ? 'Add supplier / payee' : `Edit ${supplier.name}`}
       footer={<><Button variant="ghost" onClick={onClose}>Cancel</Button><Button form="sup" type="submit" loading={busy}>Save</Button></>}>
       <form id="sup" className="form" onSubmit={save}>
-        <Field label="Supplier / freelancer name" required><Input required value={f.name} onChange={set('name')} /></Field>
+        <Field label="Name" required><Input required value={f.name} onChange={set('name')} /></Field>
         <Field label="Category"><Select placeholder={false} options={SUPPLIER_CATEGORIES} value={f.category} onChange={set('category')} /></Field>
         <Field label="Contact person"><Input value={f.contact_person} onChange={set('contact_person')} /></Field>
         <Field label="Phone"><Input value={f.phone} onChange={set('phone')} /></Field>
@@ -96,38 +98,95 @@ export function SupplierModal({ supplier, onClose, onSaved }) {
 }
 
 function SupplierDetail({ id, onBack }) {
+  const { has } = useAuth()
   const [editing, setEditing] = useState(false)
   const [order, setOrder] = useState(null)
+  const [tab, setTab] = useState('statement')
+  const [from, setFrom] = useState(() => { const d = new Date(); return `${d.getFullYear() - (d.getMonth() < 3 ? 1 : 0)}-04-01` })
+  const [to, setTo] = useState(todayISO())
   const sup = useData(() => q(supabase.from('suppliers').select('*').eq('id', id).single()), [id])
   const bills = useData(() => q(supabase.from('supplier_bills').select('*, supplier_bill_allocations(*, clients(name))').eq('supplier_id', id).order('order_date', { ascending: false })), [id], [])
   const pays = useData(() => q(supabase.from('supplier_payments').select('*, supplier_bills(number,title)').eq('supplier_id', id).order('paid_on', { ascending: false })), [id], [])
+  const exps = useData(() => q(supabase.from('expenses').select('*, clients(name)').eq('supplier_id', id).order('spent_on', { ascending: false })), [id], [])
   if (sup.loading) return <Loading />
   const s = sup.data
   const live = bills.data.filter((b) => b.status !== 'cancelled')
-  const billed = live.reduce((a, b) => a + Number(b.total), 0), paid = pays.data.reduce((a, p) => a + Number(p.amount), 0)
+  const billed = live.reduce((a, b) => a + Number(b.total), 0), paidBills = pays.data.reduce((a, p) => a + Number(p.amount), 0)
+  const expTotal = exps.data.reduce((a, e) => a + Number(e.amount), 0)
+
+  // account statement: billed (what we owe) vs paid; expenses are billed and paid on the same day
+  const opening = [...live.filter((b) => b.order_date < from).map((b) => Number(b.total)), ...exps.data.filter((e) => e.spent_on < from).map((e) => Number(e.amount))].reduce((a, x) => a + x, 0)
+    - [...pays.data.filter((p) => p.paid_on < from).map((p) => Number(p.amount)), ...exps.data.filter((e) => e.spent_on < from).map((e) => Number(e.amount))].reduce((a, x) => a + x, 0)
+  const inRange = (d) => d >= from && d <= to
+  const lines = [
+    ...live.filter((b) => inRange(b.order_date)).map((b) => ({ d: b.order_date, k: 'b' + b.id, type: 'Work order', ref: b.number, text: b.title, billed: Number(b.total), paid: 0, open: () => setOrder({ open: b.id }) })),
+    ...pays.data.filter((p) => inRange(p.paid_on)).map((p) => ({ d: p.paid_on, k: 'p' + p.id, type: `Payment · ${p.kind}`, ref: p.supplier_bills?.number, text: [p.method, p.reference, p.note].filter(Boolean).join(' · '), billed: 0, paid: Number(p.amount), open: p.bill_id && (() => setOrder({ open: p.bill_id })) })),
+    ...exps.data.filter((e) => inRange(e.spent_on)).map((e) => ({ d: e.spent_on, k: 'e' + e.id, type: `Expense · ${e.category}`, ref: '', text: [e.description, e.clients?.name && `for ${e.clients.name}`, e.method].filter(Boolean).join(' · '), billed: Number(e.amount), paid: Number(e.amount) }))
+  ].sort((x, y) => x.d.localeCompare(y.d) || (x.billed ? -1 : 1))
+  let bal = opening
+  const rows = lines.map((l) => ({ ...l, bal: (bal += l.billed - l.paid) }))
+  const tB = rows.reduce((a, r) => a + r.billed, 0), tP = rows.reduce((a, r) => a + r.paid, 0)
+  const csv = () => downloadCSV(`${s.name}-statement-${from}-to-${to}.csv`, [{ date: from, type: 'Opening balance', reference: '', details: '', billed: '', paid: '', balance: opening },
+    ...rows.map((r) => ({ date: r.d, type: r.type, reference: r.ref, details: r.text, billed: r.billed || '', paid: r.paid || '', balance: r.bal }))])
+
   return (
     <>
-      <button className="btn btn-ghost btn-sm mb" onClick={onBack}><ArrowLeft size={14} />All suppliers</button>
+      <button className="btn btn-ghost btn-sm mb" onClick={onBack}><ArrowLeft size={14} />All suppliers & payees</button>
       <PageHeader title={s.name} subtitle={[s.category, s.contact_person, s.phone].filter(Boolean).join(' · ')}
         actions={<>
           {s.phone && <a className="btn btn-outline" href={`tel:${s.phone}`}><Phone size={15} />Call</a>}
           {(s.whatsapp || s.phone) && <a className="btn btn-outline" target="_blank" rel="noreferrer" href={waLink(s.whatsapp || s.phone)}><MessageCircle size={15} />WhatsApp</a>}
           <Button variant="outline" icon={Pencil} onClick={() => setEditing(true)}>Edit</Button>
-          <Button icon={Plus} onClick={() => setOrder({ supplier_id: id })}>New work order</Button>
+          {has('suppliers.manage') && <Button icon={Plus} onClick={() => setOrder({ supplier_id: id })}>New work order</Button>}
         </>} />
       <div className="stats">
-        <Stat label="Total billed" value={money(billed)} sub={`${live.length} work orders`} icon={Truck} tone="violet" />
-        <Stat label="Paid" value={money(paid)} icon={Wallet} tone="teal" />
-        <Stat label="Payable" value={money(billed - paid)} icon={Wallet} tone={billed - paid > 0 ? 'orange' : 'green'} />
+        <Stat label="Total spent with them" value={money(billed + expTotal)} sub={`${live.length} work orders · ${exps.data.length} expenses`} icon={Truck} tone="violet" />
+        <Stat label="Paid" value={money(paidBills + expTotal)} icon={Wallet} tone="teal" />
+        <Stat label="Balance owed" value={money(billed - paidBills)} icon={Wallet} tone={billed - paidBills > 0 ? 'orange' : 'green'} />
       </div>
-      <div className="grid g-2-1">
-        <Card title="Work orders" pad={false}><BillTable rows={bills.data} onOpen={(b) => setOrder({ open: b.id })} /></Card>
-        <Card title="Payments made">
-          {pays.data.length === 0 ? <p className="faint small">No payments yet.</p> : <div className="list">{pays.data.map((p) => (
-            <div key={p.id} className="list-item small"><div className="grow"><b>{money2(p.amount)}</b> <span className="muted">· {tone(PAY_KIND, p.kind).label} · {p.method}</span><div className="tiny faint">{p.supplier_bills?.number} {p.reference && `· ${p.reference}`}</div></div><span className="muted">{date(p.paid_on)}</span></div>))}</div>}
-          {(s.upi_id || s.bank_details) && <div className="small mt"><b>Pay to</b><div className="pre muted">{[s.upi_id && `UPI: ${s.upi_id}`, s.bank_details].filter(Boolean).join('\n')}</div></div>}
-        </Card>
-      </div>
+      <Tabs value={tab} onChange={setTab} tabs={[{ id: 'statement', label: 'Account statement' }, { id: 'orders', label: 'Work orders', count: bills.data.length }, { id: 'expenses', label: 'Expenses', count: exps.data.length }, { id: 'details', label: 'Details' }]} />
+      {tab === 'statement' && (
+        <>
+          <div className="filters">
+            <Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} style={{ width: 160 }} />
+            <span className="muted">to</span>
+            <Input type="date" value={to} onChange={(e) => setTo(e.target.value)} style={{ width: 160 }} />
+            <div className="grow" />
+            <Button variant="outline" icon={Download} onClick={csv}>Export statement</Button>
+          </div>
+          <Card pad={false}><div className="table-wrap"><table className="table">
+            <thead><tr><th>Date</th><th>Type</th><th>Ref</th><th>Details</th><th className="num">Billed</th><th className="num">Paid</th><th className="num">Balance owed</th></tr></thead>
+            <tbody>
+              <tr><td className="nowrap">{date(from)}</td><td colSpan={5} className="strong">Opening balance</td><td className="num strong">{money2(opening)}</td></tr>
+              {rows.length === 0 && <tr><td colSpan={7} className="center faint">No transactions in this period</td></tr>}
+              {rows.map((r) => (
+                <tr key={r.k} className={r.open ? 'click' : ''} onClick={() => r.open && r.open()}>
+                  <td className="nowrap">{date(r.d)}</td>
+                  <td><Badge tone={r.type.startsWith('Work') ? 'violet' : r.type.startsWith('Payment') ? 'teal' : 'slate'}>{r.type}</Badge></td>
+                  <td className="small nowrap">{r.ref || '—'}</td><td className="small">{r.text || '—'}</td>
+                  <td className="num">{r.billed ? money2(r.billed) : ''}</td><td className="num" style={{ color: 'var(--green-d)' }}>{r.paid ? money2(r.paid) : ''}</td>
+                  <td className="num strong">{money2(r.bal)}</td>
+                </tr>))}
+            </tbody>
+            <tfoot><tr><td colSpan={4}>Closing balance · {date(to)}</td><td className="num">{money2(tB)}</td><td className="num">{money2(tP)}</td><td className="num">{money2(bal)}</td></tr></tfoot>
+          </table></div></Card>
+          <p className="small faint mt">Work orders add to what you owe; supplier payments reduce it. Expenses are paid on the spot, so they appear in both columns.</p>
+        </>
+      )}
+      {tab === 'orders' && <Card pad={false}><BillTable rows={bills.data} onOpen={(b) => setOrder({ open: b.id })} /></Card>}
+      {tab === 'expenses' && (exps.data.length === 0 ? <Empty icon={Wallet} title="No expenses recorded for this payee" /> : (
+        <Card pad={false}><div className="table-wrap"><table className="table">
+          <thead><tr><th>Date</th><th>Category</th><th>Details</th><th>Method</th><th className="num">Amount</th></tr></thead>
+          <tbody>{exps.data.map((e) => <tr key={e.id}><td className="nowrap">{date(e.spent_on)}</td><td>{e.category}{e.recurring && <> <Badge tone="slate">Recurring</Badge></>}</td><td className="small">{e.description || '—'}{e.clients?.name && ` · for ${e.clients.name}`}</td><td>{e.method}</td><td className="num strong">{money2(e.amount)}</td></tr>)}</tbody>
+          <tfoot><tr><td colSpan={4}>Total</td><td className="num">{money2(expTotal)}</td></tr></tfoot>
+        </table></div></Card>
+      ))}
+      {tab === 'details' && (
+        <Card><dl className="kv">
+          <dt>Category</dt><dd>{s.category}</dd><dt>Contact</dt><dd>{s.contact_person || '—'}</dd><dt>Phone</dt><dd>{s.phone || '—'}</dd><dt>Email</dt><dd>{s.email || '—'}</dd>
+          <dt>Pay to</dt><dd className="pre">{[s.upi_id && `UPI: ${s.upi_id}`, s.bank_details].filter(Boolean).join('\n') || '—'}</dd><dt>Notes</dt><dd className="pre">{s.notes || '—'}</dd>
+        </dl></Card>
+      )}
       {editing && <SupplierModal supplier={s} onClose={() => setEditing(false)} onSaved={() => { setEditing(false); sup.reload() }} />}
       {order && (order.open
         ? <WorkOrderView id={order.open} onClose={() => { setOrder(null); bills.reload(); pays.reload() }} />
@@ -292,7 +351,7 @@ export function WorkOrderModal({ order = {}, onClose, onSaved }) {
 
 /* =========================================================== Work order detail */
 export function WorkOrderView({ id, onClose }) {
-  const { can } = useAuth()
+  const { has } = useAuth()
   const { confirm } = useToast()
   const [editing, setEditing] = useState(false)
   const [paying, setPaying] = useState(null)
@@ -302,7 +361,7 @@ export function WorkOrderView({ id, onClose }) {
   if (b.loading || !b.data) return <Modal open drawer size="lg" onClose={onClose} title="Work order"><Loading /></Modal>
   const x = b.data
   const balance = Number(x.total) - Number(x.amount_paid)
-  const isFin = can('finance')
+  const isFin = has('suppliers.pay')
   const setWork = (ws) => run(async () => { await q(supabase.from('supplier_bills').update({ work_status: ws }).eq('id', id)); b.reload() }, ws === 'received' ? 'Marked work received' : 'Updated')
   const del = async () => {
     if (!(await confirm(`Delete work order ${x.number}? Its supplier payments are removed too.`, { danger: true, okText: 'Delete' }))) return
@@ -312,7 +371,7 @@ export function WorkOrderView({ id, onClose }) {
   return (
     <Modal open drawer size="lg" onClose={onClose} title={x.title} subtitle={<span className="row gap-s wrap"><Badge tone="slate">{x.number}</Badge><Pill list={WORK_STATUS} v={x.work_status} /><Pill list={BILL_PAY_STATUS} v={x.status} /></span>}
       footer={<>
-        {can('finance') && <IconBtn icon={Trash2} title="Delete" onClick={del} />}
+        {has('suppliers.manage') && <IconBtn icon={Trash2} title="Delete" onClick={del} />}
         <div className="grow" />
         {x.work_status !== 'received' && x.work_status !== 'cancelled' && <Button variant="outline" icon={PackageCheck} loading={busy} onClick={() => setWork('received')}>Work received</Button>}
         <Button variant="outline" icon={Pencil} onClick={() => setEditing(true)}>Edit</Button>
@@ -392,7 +451,7 @@ export function SupplierPaymentModal({ bill, preset = {}, onClose, onSaved }) {
 
 /* =========================================================== Money flow for an invoice or a client */
 export function MoneyFlow({ invoice, clientId }) {
-  const { can } = useAuth()
+  const { has } = useAuth()
   const [order, setOrder] = useState(null)
   const data = useData(async () => {
     const allocs = await q((invoice
@@ -426,7 +485,7 @@ export function MoneyFlow({ invoice, clientId }) {
   let run = 0
   return (
     <Card className={invoice ? 'mt-l no-print' : ''} style={invoice ? { maxWidth: 820, margin: '20px auto 0' } : undefined} title={invoice ? 'Money flow for this job' : 'Money flow — customer receipts vs supplier costs'}
-      actions={can('marketer', 'finance') && <Button size="sm" variant="outline" icon={Truck} onClick={() => setOrder({ alloc: [{ client_id: invoice?.client_id || clientId, invoice_id: invoice?.id || '', amount: '' }] })}>Add supplier cost</Button>}>
+      actions={has('suppliers.manage') && <Button size="sm" variant="outline" icon={Truck} onClick={() => setOrder({ alloc: [{ client_id: invoice?.client_id || clientId, invoice_id: invoice?.id || '', amount: '' }] })}>Add supplier cost</Button>}>
       <div className="grid g4 mb small">
         <div><div className="muted">Billed to customer</div><b style={{ fontSize: 17 }}>{money(billed)}</b></div>
         <div><div className="muted">Received</div><b style={{ fontSize: 17, color: 'var(--green-d)' }}>{money(received)}</b><div className="faint">{money(billed - received)} pending</div></div>

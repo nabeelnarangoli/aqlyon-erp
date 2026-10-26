@@ -4,6 +4,7 @@ import { configured } from './lib/supabase'
 import { AuthProvider, useAuth } from './lib/auth'
 import { ToastProvider, Loading } from './components/ui'
 import Layout from './components/Layout'
+import { REPORT_PERMS } from './lib/permissions'
 import Login from './pages/Login'
 import SetupNeeded from './pages/SetupNeeded'
 
@@ -45,9 +46,9 @@ export default function App() {
   )
 }
 
-function Guard({ roles, children }) {
-  const { can } = useAuth()
-  return can(...roles) ? children : <Navigate to="/" replace />
+function Guard({ perm, children }) {
+  const { has } = useAuth()
+  return has(...perm) ? children : <Navigate to="/" replace />
 }
 
 function Gate() {
@@ -67,35 +68,34 @@ function Gate() {
       </div>
     )
   }
-  const M = ['marketer'], D = ['designer'], F = ['finance']
   return (
     <Suspense fallback={<Loading />}>
       <Routes>
         <Route element={<Layout />}>
           <Route index element={<Dashboard />} />
-          <Route path="leads" element={<Guard roles={M}><Leads /></Guard>} />
-          <Route path="clients" element={<Guard roles={[...M, ...D, ...F]}><Clients /></Guard>} />
-          <Route path="clients/:id" element={<Guard roles={[...M, ...D, ...F]}><ClientDetail /></Guard>} />
-          <Route path="followups" element={<Guard roles={M}><FollowUps /></Guard>} />
-          <Route path="projects" element={<Guard roles={[...M, ...D]}><Projects /></Guard>} />
-          <Route path="tasks" element={<Guard roles={[...M, ...D]}><Tasks /></Guard>} />
-          <Route path="tasks/:id" element={<Guard roles={[...M, ...D]}><TaskDetail /></Guard>} />
-          <Route path="calendar" element={<Guard roles={[...M, ...D]}><Calendar /></Guard>} />
-          <Route path="timesheet" element={<Guard roles={[...M, ...D]}><Timesheet /></Guard>} />
+          <Route path="leads" element={<Guard perm={['leads.view', 'leads.manage']}><Leads /></Guard>} />
+          <Route path="clients" element={<Guard perm={['clients.view', 'clients.manage']}><Clients /></Guard>} />
+          <Route path="clients/:id" element={<Guard perm={['clients.view', 'clients.manage']}><ClientDetail /></Guard>} />
+          <Route path="followups" element={<Guard perm={['leads.manage', 'clients.manage']}><FollowUps /></Guard>} />
+          <Route path="projects" element={<Guard perm={['projects.view', 'projects.manage']}><Projects /></Guard>} />
+          <Route path="tasks" element={<Guard perm={['tasks.view', 'tasks.work', 'tasks.manage', 'tasks.review']}><Tasks /></Guard>} />
+          <Route path="tasks/:id" element={<Guard perm={['tasks.view', 'tasks.work', 'tasks.manage', 'tasks.review']}><TaskDetail /></Guard>} />
+          <Route path="calendar" element={<Guard perm={['calendar.view', 'calendar.manage']}><Calendar /></Guard>} />
+          <Route path="timesheet" element={<Guard perm={['tasks.work', 'tasks.manage', 'timesheet.all']}><Timesheet /></Guard>} />
           <Route path="queries" element={<Queries />} />
           <Route path="queries/:id" element={<Queries />} />
-          <Route path="finance/invoices" element={<Guard roles={[...F, ...M]}><Invoices /></Guard>} />
-          <Route path="finance/invoices/:id" element={<Guard roles={[...F, ...M]}><InvoiceView kind="invoice" /></Guard>} />
-          <Route path="finance/quotations" element={<Guard roles={[...F, ...M]}><Quotations /></Guard>} />
-          <Route path="finance/quotations/:id" element={<Guard roles={[...F, ...M]}><InvoiceView kind="quote" /></Guard>} />
-          <Route path="finance/payments" element={<Guard roles={F}><Payments /></Guard>} />
-          <Route path="finance/expenses" element={<Guard roles={F}><Expenses /></Guard>} />
-          <Route path="finance/suppliers" element={<Guard roles={[...F, ...M]}><Suppliers /></Guard>} />
-          <Route path="finance/suppliers/:id" element={<Guard roles={[...F, ...M]}><Suppliers /></Guard>} />
-          <Route path="finance/work-orders" element={<Guard roles={[...F, ...M]}><WorkOrders /></Guard>} />
-          <Route path="reports" element={<Guard roles={[...M, ...D, ...F]}><Reports /></Guard>} />
-          <Route path="team" element={<Guard roles={[]}><Team /></Guard>} />
-          <Route path="settings" element={<Guard roles={[]}><SettingsPage /></Guard>} />
+          <Route path="finance/invoices" element={<Guard perm={['invoices.view', 'invoices.manage']}><Invoices /></Guard>} />
+          <Route path="finance/invoices/:id" element={<Guard perm={['invoices.view', 'invoices.manage']}><InvoiceView kind="invoice" /></Guard>} />
+          <Route path="finance/quotations" element={<Guard perm={['quotations.view', 'quotations.manage']}><Quotations /></Guard>} />
+          <Route path="finance/quotations/:id" element={<Guard perm={['quotations.view', 'quotations.manage']}><InvoiceView kind="quote" /></Guard>} />
+          <Route path="finance/payments" element={<Guard perm={['payments.manage']}><Payments /></Guard>} />
+          <Route path="finance/expenses" element={<Guard perm={['expenses.manage']}><Expenses /></Guard>} />
+          <Route path="finance/suppliers" element={<Guard perm={['suppliers.view', 'suppliers.manage', 'suppliers.pay', 'expenses.manage', 'payments.manage']}><Suppliers /></Guard>} />
+          <Route path="finance/suppliers/:id" element={<Guard perm={['suppliers.view', 'suppliers.manage', 'suppliers.pay', 'expenses.manage', 'payments.manage']}><Suppliers /></Guard>} />
+          <Route path="finance/work-orders" element={<Guard perm={['suppliers.view', 'suppliers.manage', 'suppliers.pay']}><WorkOrders /></Guard>} />
+          <Route path="reports" element={<Guard perm={REPORT_PERMS}><Reports /></Guard>} />
+          <Route path="team" element={<Guard perm={['team.manage']}><Team /></Guard>} />
+          <Route path="settings" element={<Guard perm={['settings.manage']}><SettingsPage /></Guard>} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
       </Routes>

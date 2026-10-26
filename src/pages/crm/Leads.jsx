@@ -55,7 +55,7 @@ export default function Leads() {
         </>} />
       <div className="filters">
         <SearchInput value={search} onChange={setSearch} placeholder="Search name, company, phone…" />
-        <MemberSelect value={owner} onChange={(v) => setOwner(v || '')} roles={['admin', 'marketer']} placeholder="All owners" />
+        <MemberSelect value={owner} onChange={(v) => setOwner(v || '')} perm={['leads.manage', 'clients.manage']} placeholder="All owners" />
         <Select options={LEAD_SOURCES} value={source} onChange={(v) => setSource(v || '')} placeholder="All sources" />
         <div className="grow" />
         <div className="seg">
@@ -206,7 +206,7 @@ export function LeadModal({ lead, onClose, onSaved }) {
           <Field label="Estimated monthly / deal value (₹)"><Input type="number" min="0" value={f.estimated_value} onChange={set('estimated_value')} /></Field>
           <Field label="Temperature"><Select placeholder={false} options={[{ id: 'hot', label: '🔥 Hot' }, { id: 'warm', label: '☀️ Warm' }, { id: 'cold', label: '❄️ Cold' }]} value={f.temperature} onChange={set('temperature')} /></Field>
           <Field label="Stage"><Select placeholder={false} options={LEAD_STAGES} value={f.stage} onChange={set('stage')} /></Field>
-          <Field label="Owner"><MemberSelect roles={['admin', 'marketer']} value={f.owner_id} onChange={set('owner_id')} /></Field>
+          <Field label="Owner"><MemberSelect perm={['leads.manage', 'clients.manage']} value={f.owner_id} onChange={set('owner_id')} /></Field>
           <Field label="Next follow-up"><Input type="date" value={f.next_follow_up} onChange={set('next_follow_up')} /></Field>
           {f.stage === 'lost' && <Field label="Lost reason"><Select options={['Budget too high', 'Chose competitor', 'No response', 'Not ready yet', 'Doing it in-house', 'Other']} value={f.lost_reason} onChange={set('lost_reason')} /></Field>}
           <Field label="Notes" span={2}><Textarea value={f.notes} onChange={set('notes')} placeholder="Requirements, budget, decision maker, competitors…" /></Field>

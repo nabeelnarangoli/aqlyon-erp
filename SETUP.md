@@ -56,30 +56,19 @@ git push -u origin main staging
 1. Sign in with the admin account from step 1.5.
 2. **Settings → Company & invoices**: confirm address, phone, add bank details + UPI ID (printed on invoices).
 3. **Settings → Services & pricing**: adjust the starter price list.
-4. **Team & Access → Add team member** for each person: name, email, temporary password, role, designation,
-   internal cost/hour (salary ÷ monthly hours — used for client profitability) and weekly hours.
+4. **Team & Access → Roles & permissions**: review the starting roles or build your own.
+   Then **Users → Add user** for each person: name, email, temporary password, role, monthly salary, working days and hours.
 5. Add clients (or convert won leads), then add each client's **retainer package** (fee + posts/reels/stories per month).
 
 ---
 
-## Roles
+## Roles, permissions and staff
 
-| Area | Admin | Digital Marketer | Graphic Designer | Finance |
-|---|---|---|---|---|
-| Leads, follow-ups | ✓ | ✓ | — | — |
-| Clients | Full | Full | View (brand kit) | View |
-| Packages / retainers | Full | Full | — | View |
-| Design tasks | Full | Create, review, approve | Work, upload proofs, log time | — |
-| Content calendar | Full | Full | View | — |
-| Quotations | Full | Full | — | Full |
-| Invoices | Full | View | — | Full |
-| Payments & expenses | Full | — | — | Full |
-| Suppliers & work orders | Full | Create, assign to customers | — | Full + pay suppliers |
-| Team queries | All | Own + team inbox | Own + team inbox | Own + team inbox |
-| Reports | All | Sales, team, content, clients | Own productivity | P&L, receivables, clients |
-| Team & settings | ✓ | — | — | — |
+**Team & Access → Roles & permissions**: create any role (e.g. *Social Media Executive*, *Video Editor*, *Accounts Assistant*) and tick exactly what it can see and do — leads, clients, packages, design tasks, proof approval, calendar, quotations, invoices, payments, expenses, suppliers, each report, user management and settings. Four starting roles are provided (Administrator, Digital Marketer, Graphic Designer, Finance) and can be edited or duplicated; Administrator always keeps full access.
 
-Permissions are enforced **inside the database** (Postgres row-level security), so a user can't see or change data outside their role even by calling the API directly.
+**Team & Access → Users**: create a login, pick its role, and record **monthly salary**, **working days** and **working hours**. Cost per hour is calculated automatically (salary ÷ monthly working hours) and feeds client profitability. Salaries are visible only to people who can manage users.
+
+Permissions are enforced inside the database (row-level security), so hiding a menu is never the only protection.
 
 ## How the design workflow runs
 
@@ -109,6 +98,10 @@ Marketer: Mark delivered
 3. Mark **Work received** when the supplier delivers.
 4. Every invoice shows a **Money flow for this job** card: billed, received, supplier cost (paid / still to pay) and your margin, with a dated in/out timeline.
 5. **Payments & cash flow** lists all money in and out with a running balance; P&L and client profitability include supplier costs.
+
+## Expenses & payees
+
+Every expense is paid to a payee chosen from **Suppliers & payees** (press **+** to add a new one — landlord, KSEB, Adobe, staff…). Click any payee name — in Expenses, Payments & cash flow, or Reports → Spend by payee — to open their **account statement**: every expense, work order and payment with an opening balance, running balance owed and CSV export.
 
 ## Updating the database later
 

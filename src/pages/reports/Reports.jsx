@@ -1,3 +1,4 @@
+import { Link } from 'react-router-dom'
 import { useMemo, useState } from 'react'
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, Legend, PieChart, Pie, Cell
@@ -20,14 +21,14 @@ const monthsBetween = (from, to) => {
 const mLabel = (k) => new Date(k + '-01T00:00:00').toLocaleDateString('en-IN', { month: 'short', year: '2-digit' })
 
 export default function Reports() {
-  const { can, role } = useAuth()
+  const { has } = useAuth()
   const tabs = [
-    can('finance') && { id: 'finance', label: 'Profit & Loss' },
-    can('finance') && { id: 'receivables', label: 'Receivables' },
-    can('finance', 'marketer') && { id: 'clients', label: 'Client profitability' },
-    can('marketer') && { id: 'sales', label: 'Sales & leads' },
-    can('marketer', 'designer') && { id: 'team', label: role === 'designer' ? 'My productivity' : 'Team productivity' },
-    can('marketer') && { id: 'content', label: 'Content delivery' }
+    has('reports.finance') && { id: 'finance', label: 'Profit & Loss' },
+    has('reports.finance') && { id: 'receivables', label: 'Receivables' },
+    has('reports.clients') && { id: 'clients', label: 'Client profitability' },
+    has('reports.sales') && { id: 'sales', label: 'Sales & leads' },
+    has('reports.team', 'tasks.work') && { id: 'team', label: has('reports.team') ? 'Team productivity' : 'My productivity' },
+    has('reports.content') && { id: 'content', label: 'Content delivery' }
   ].filter(Boolean)
   const [tab, setTab] = useState(tabs[0]?.id)
   const y = new Date()
@@ -71,8 +72,8 @@ function PnL({ from, to }) {
     const [inv, pay, exp, sb, sp] = await Promise.all([
       q(supabase.from('invoices').select('issue_date,total,status').neq('status', 'cancelled').neq('status', 'draft').gte('issue_date', from).lte('issue_date', to)),
       q(supabase.from('payments').select('paid_on,amount').gte('paid_on', from).lte('paid_on', to)),
-      q(supabase.from('expenses').select('spent_on,amount,category,rebillable').gte('spent_on', from).lte('spent_on', to)),
-      q(supabase.from('supplier_bills').select('order_date,total,status').neq('status', 'cancelled').gte('order_date', from).lte('order_date', to)),
+      q(supabase.from('expenses').select('spent_on,amount,category,rebillable,supplier_id,vendor').gte('spent_on', from).lte('spent_on', to)),
+      q(supabase.from('supplier_bills').select('order_date,total,status,supplier_id, suppliers(name)').neq('status', 'cancelled').gte('order_date', from).lte('order_date', to)),
       q(supabase.from('supplier_payments').select('paid_on,amount').gte('paid_on', from).lte('paid_on', to))
     ])
     return { inv, pay, exp, sb, sp }
@@ -94,6 +95,9 @@ function PnL({ from, to }) {
   })
   const T = rows.reduce((a, r) => ({ Invoiced: a.Invoiced + r.Invoiced, Collected: a.Collected + r.Collected, Expenses: a.Expenses + r.Expenses, Suppliers: a.Suppliers + r.Suppliers, SupPaid: a.SupPaid + r.SupPaid }), { Invoiced: 0, Collected: 0, Expenses: 0, Suppliers: 0, SupPaid: 0 })
   const profit = T.Invoiced - T.Expenses - T.Suppliers, cash = T.Collected - T.Expenses - T.SupPaid
+  const byPayee = Object.values([...data.exp.filter((e) => e.supplier_id).map((e) => ({ id: e.supplier_id, name: e.vendor, amt: Number(e.amount), kind: 'exp' })),
+    ...data.sb.filter((b) => b.supplier_id).map((b) => ({ id: b.supplier_id, name: b.suppliers?.name, amt: Number(b.total), kind: 'sup' }))]
+    .reduce((a, x) => { a[x.id] ||= { id: x.id, name: x.name, exp: 0, sup: 0 }; a[x.id][x.kind] += x.amt; return a }, {})).map((x) => ({ ...x, total: x.exp + x.sup })).sort((a, b) => b.total - a.total)
   const byCat = Object.entries(data.exp.reduce((a, e) => ({ ...a, [e.category]: (a[e.category] || 0) + Number(e.amount) }), {})).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value)
   return (
     <>
@@ -127,6 +131,16 @@ function PnL({ from, to }) {
           <tbody>{rows.map((r) => <tr key={r.k}><td>{r.m}</td><td className="num">{money(r.Invoiced)}</td><td className="num">{money(r.Collected)}</td><td className="num">{money(r.Suppliers)}</td><td className="num">{money(r.Expenses)}</td><td className="num strong" style={{ color: r.Profit < 0 ? 'var(--red)' : undefined }}>{money(r.Profit)}</td><td className="num">{money(r.Cash)}</td></tr>)}</tbody>
           <tfoot><tr><td>Total</td><td className="num">{money(T.Invoiced)}</td><td className="num">{money(T.Collected)}</td><td className="num">{money(T.Suppliers)}</td><td className="num">{money(T.Expenses)}</td><td className="num">{money(profit)}</td><td className="num">{money(cash)}</td></tr></tfoot>
         </table></div>
+      </Card>
+      <Card className="mt" title="Spend by payee" pad={false} actions={<Link className="btn btn-ghost btn-sm" to="/finance/suppliers">All payees</Link>}>
+        {byPayee.length === 0 ? <p className="card-body faint small">No payee spend in this period.</p> : (
+          <div className="table-wrap"><table className="table">
+            <thead><tr><th>Payee</th><th className="num">Expenses</th><th className="num">Supplier work</th><th className="num">Total</th><th style={{ width: '28%' }} /></tr></thead>
+            <tbody>{byPayee.map((x) => (
+              <tr key={x.id}><td><Link to={`/finance/suppliers/${x.id}`} className="strong" title="Open account statement">{x.name}</Link></td>
+                <td className="num">{x.exp ? money(x.exp) : '—'}</td><td className="num">{x.sup ? money(x.sup) : '—'}</td><td className="num strong">{money(x.total)}</td>
+                <td><Progress value={x.total} max={byPayee[0].total} /></td></tr>))}</tbody>
+          </table></div>)}
       </Card>
       <Card className="mt" title="Expense breakdown" pad={false}>
         <div className="table-wrap"><table className="table"><tbody>
@@ -166,20 +180,22 @@ function Receivables() {
 
 /* ---------------- Client profitability ---------------- */
 function ClientProfit({ from, to }) {
-  const { team, can } = useAuth()
+  const { team, has } = useAuth()
+  const showMoney = has('reports.finance', 'invoices.view', 'invoices.manage')
   const { data, loading } = useData(async () => {
     const [clients, inv, logs, tasks, exp, packs, alloc] = await Promise.all([
       q(supabase.from('clients').select('id,name,status')),
-      can('finance') ? q(supabase.from('invoices').select('client_id,total,status,issue_date').neq('status', 'cancelled').neq('status', 'draft').gte('issue_date', from).lte('issue_date', to)) : [],
+      has('invoices.view', 'invoices.manage') ? q(supabase.from('invoices').select('client_id,total,status,issue_date').neq('status', 'cancelled').neq('status', 'draft').gte('issue_date', from).lte('issue_date', to)) : [],
       q(supabase.from('time_logs').select('client_id,user_id,minutes,billable').gte('log_date', from).lte('log_date', to)),
-      can('marketer') ? q(supabase.from('design_tasks').select('client_id,status,revision_count,delivered_at').gte('created_at', from).lte('created_at', to + 'T23:59:59')) : [],
-      can('finance') ? q(supabase.from('expenses').select('client_id,amount,rebillable').not('client_id', 'is', null).gte('spent_on', from).lte('spent_on', to)) : [],
+      has('tasks.view', 'tasks.manage') ? q(supabase.from('design_tasks').select('client_id,status,revision_count,delivered_at').gte('created_at', from).lte('created_at', to + 'T23:59:59')) : [],
+      has('expenses.manage', 'reports.finance', 'reports.clients') ? q(supabase.from('expenses').select('client_id,amount,rebillable').not('client_id', 'is', null).gte('spent_on', from).lte('spent_on', to)) : [],
       q(supabase.from('packages').select('client_id,fee,billing_type,status').eq('status', 'active')),
-      can('finance') ? q(supabase.from('supplier_bill_allocations').select('client_id,amount, supplier_bills(order_date,status)')) : []
+      has('suppliers.view', 'reports.clients') ? q(supabase.from('supplier_bill_allocations').select('client_id,amount, supplier_bills(order_date,status)')) : []
     ])
-    return { clients, inv, logs, tasks, exp, packs, alloc: alloc.filter((a) => a.supplier_bills && a.supplier_bills.status !== 'cancelled' && a.supplier_bills.order_date >= from && a.supplier_bills.order_date <= to) }
+    const rates = await q(supabase.rpc('staff_cost_rates')).catch(() => [])
+    return { rates: rates || [], clients, inv, logs, tasks, exp, packs, alloc: alloc.filter((a) => a.supplier_bills && a.supplier_bills.status !== 'cancelled' && a.supplier_bills.order_date >= from && a.supplier_bills.order_date <= to) }
   }, [from, to], null)
-  const rate = (uid) => Number(team.find((m) => m.id === uid)?.cost_per_hour || 0)
+  const rate = (uid) => Number((data?.rates || []).find((r) => r.user_id === uid)?.cost_per_hour || 0)
   const rows = useMemo(() => !data ? [] : data.clients.map((c) => {
     const revenue = data.inv.filter((i) => i.client_id === c.id).reduce((a, i) => a + Number(i.total), 0)
     const logs = data.logs.filter((l) => l.client_id === c.id)
@@ -193,13 +209,13 @@ function ClientProfit({ from, to }) {
       mrr: data.packs.filter((p) => p.client_id === c.id).reduce((a, p) => a + monthly(p), 0), effRate: mins ? revenue / (mins / 60) : 0 }
   }).filter((r) => r.revenue || r.mins || r.tasks || r.direct).sort((a, b) => b.revenue - a.revenue || b.mins - a.mins), [data, team])
   if (loading || !data) return <Loading />
-  const noRates = team.every((m) => !Number(m.cost_per_hour))
+  const noRates = !(data.rates || []).some((r) => Number(r.cost_per_hour))
   return (
     <>
-      {noRates && <div className="alert alert-info">Set each team member’s internal cost per hour in Team & Access to see true labour cost and margin per client.</div>}
+      {noRates && <div className="alert alert-info">Add each team member’s monthly salary in Team & Access to see true labour cost and margin per client.</div>}
       {rows.length === 0 ? <Empty title="No client activity in this period" /> : (
         <>
-          {can('finance') && <ChartCard title="Revenue vs delivery cost by client (top 10)" h={300}>
+          {showMoney && <ChartCard title="Revenue vs delivery cost by client (top 10)" h={300}>
             <BarChart data={rows.slice(0, 10)} layout="vertical" margin={{ left: 20 }}>
               <CartesianGrid horizontal={false} stroke="#eee" /><XAxis type="number" tickFormatter={compact} fontSize={12} /><YAxis type="category" dataKey="name" width={130} fontSize={12} />
               <Tooltip formatter={(v) => money(v)} /><Legend iconType="circle" wrapperStyle={{ fontSize: 12 }} />
@@ -208,14 +224,14 @@ function ClientProfit({ from, to }) {
           </ChartCard>}
           <Card className="mt" title="Client scorecard" pad={false} actions={<Button size="sm" variant="ghost" icon={Download} onClick={() => downloadCSV('client-profitability.csv', rows.map((r) => ({ client: r.name, revenue: r.revenue, hours: (r.mins / 60).toFixed(1), labour_cost: Math.round(r.labour), direct_cost: r.direct, profit: Math.round(r.profit), margin_pct: r.margin, tasks: r.tasks, avg_revisions: r.revs.toFixed(1) })))}>CSV</Button>}>
             <div className="table-wrap"><table className="table">
-              <thead><tr><th>Client</th>{can('finance') && <th className="num">Revenue</th>}<th className="num">Monthly fee</th><th className="num">Hours</th>{can('finance') && <><th className="num">Labour cost</th><th className="num">Supplier & direct cost</th><th className="num">Profit</th><th className="num">Margin</th><th className="num">₹ / hour</th></>}<th className="num">Tasks</th><th className="num">Avg revisions</th></tr></thead>
+              <thead><tr><th>Client</th>{showMoney && <th className="num">Revenue</th>}<th className="num">Monthly fee</th><th className="num">Hours</th>{showMoney && <><th className="num">Labour cost</th><th className="num">Supplier & direct cost</th><th className="num">Profit</th><th className="num">Margin</th><th className="num">₹ / hour</th></>}<th className="num">Tasks</th><th className="num">Avg revisions</th></tr></thead>
               <tbody>{rows.map((r) => (
                 <tr key={r.id}>
                   <td className="cell-title">{r.name}</td>
-                  {can('finance') && <td className="num">{money(r.revenue)}</td>}
+                  {showMoney && <td className="num">{money(r.revenue)}</td>}
                   <td className="num">{r.mrr ? money(r.mrr) : '—'}</td>
                   <td className="num">{hours(r.mins)}</td>
-                  {can('finance') && <><td className="num">{money(r.labour)}</td><td className="num">{money(r.direct)}</td>
+                  {showMoney && <><td className="num">{money(r.labour)}</td><td className="num">{money(r.direct)}</td>
                     <td className="num strong" style={{ color: r.profit < 0 ? 'var(--red)' : undefined }}>{money(r.profit)}</td>
                     <td className="num"><Badge tone={r.margin >= 50 ? 'green' : r.margin >= 25 ? 'amber' : 'red'}>{r.revenue ? `${r.margin}%` : '—'}</Badge></td>
                     <td className="num">{r.effRate ? money(r.effRate) : '—'}</td></>}
@@ -232,13 +248,13 @@ function ClientProfit({ from, to }) {
 
 /* ---------------- Sales ---------------- */
 function Sales({ from, to }) {
-  const { team } = useAuth()
+  const { managers } = useAuth()
   const { data, loading } = useData(() => q(supabase.from('leads').select('*').gte('created_at', from).lte('created_at', to + 'T23:59:59')), [from, to], null)
   if (loading || !data) return <Loading />
   const won = data.filter((l) => l.stage === 'won'), lost = data.filter((l) => l.stage === 'lost')
   const sources = LEAD_SOURCES.map((s) => { const x = data.filter((l) => l.source === s); const w = x.filter((l) => l.stage === 'won'); return { s, n: x.length, w: w.length, v: w.reduce((a, l) => a + Number(l.estimated_value || 0), 0) } }).filter((r) => r.n).sort((a, b) => b.n - a.n)
   const reasons = Object.entries(lost.reduce((a, l) => ({ ...a, [l.lost_reason || 'Not specified']: (a[l.lost_reason || 'Not specified'] || 0) + 1 }), {})).sort((a, b) => b[1] - a[1])
-  const owners = team.filter((m) => ['marketer', 'admin'].includes(m.role)).map((m) => { const x = data.filter((l) => l.owner_id === m.id); const w = x.filter((l) => l.stage === 'won'); return { m, n: x.length, w: w.length, v: w.reduce((a, l) => a + Number(l.estimated_value || 0), 0) } }).filter((r) => r.n)
+  const owners = managers.map((m) => { const x = data.filter((l) => l.owner_id === m.id); const w = x.filter((l) => l.stage === 'won'); return { m, n: x.length, w: w.length, v: w.reduce((a, l) => a + Number(l.estimated_value || 0), 0) } }).filter((r) => r.n)
   const funnel = LEAD_STAGES.filter((s) => s.id !== 'lost').map((s, i, arr) => ({ ...s, n: data.filter((l) => arr.slice(i).some((x) => x.id === l.stage)).length }))
   return (
     <>
@@ -273,7 +289,7 @@ function Sales({ from, to }) {
 
 /* ---------------- Team productivity ---------------- */
 function Team({ from, to }) {
-  const { team, role, user } = useAuth()
+  const { team, user, has, memberHas, roleOf } = useAuth()
   const { data, loading } = useData(async () => {
     const [tasks, logs] = await Promise.all([
       q(supabase.from('design_tasks').select('assignee_id,status,due_date,approved_at,delivered_at,revision_count,max_revisions,quantity,created_at').not('assignee_id', 'is', null).gte('created_at', from).lte('created_at', to + 'T23:59:59')),
@@ -283,7 +299,7 @@ function Team({ from, to }) {
   }, [from, to], null)
   if (loading || !data) return <Loading />
   const weeks = Math.max(1, Math.round((new Date(to) - new Date(from)) / (7 * 86400000)))
-  const people = team.filter((m) => m.active && (role === 'designer' ? m.id === user.id : ['designer', 'marketer', 'admin'].includes(m.role)))
+  const people = team.filter((m) => m.active && (has('reports.team') ? memberHas(m, 'tasks.work', 'tasks.manage', 'leads.manage') : m.id === user.id))
   const rows = people.map((m) => {
     const t = data.tasks.filter((x) => x.assignee_id === m.id)
     const done = t.filter((x) => ['approved', 'delivered'].includes(x.status))
@@ -308,7 +324,7 @@ function Team({ from, to }) {
           <thead><tr><th>Person</th><th className="num">Assigned</th><th className="num">Approved</th><th className="num">Pieces</th><th className="num">On time</th><th className="num">First-pass approval</th><th className="num">Avg revisions</th><th className="num">Hours logged</th><th className="num">Utilisation</th></tr></thead>
           <tbody>{rows.map((r) => (
             <tr key={r.m.id}>
-              <td><span className="row gap-s"><Avatar name={r.m.full_name} size={24} /><span><b>{r.m.full_name}</b><div className="cell-sub">{r.m.designation || r.m.role}</div></span></span></td>
+              <td><span className="row gap-s"><Avatar name={r.m.full_name} size={24} /><span><b>{r.m.full_name}</b><div className="cell-sub">{r.m.designation || roleOf(r.m.role_id)?.name}</div></span></span></td>
               <td className="num">{r.assigned}</td><td className="num">{r.done}</td><td className="num">{r.pieces}</td>
               <td className="num"><Badge tone={r.onTime >= 85 ? 'green' : r.onTime >= 65 ? 'amber' : 'red'}>{r.done ? `${r.onTime}%` : '—'}</Badge></td>
               <td className="num">{r.done ? `${r.firstPass}%` : '—'}</td>

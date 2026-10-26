@@ -7,7 +7,7 @@ import { toISO, todayISO, hours, date, pct } from '../../lib/format'
 import { PageHeader, Button, Card, Stat, MemberSelect, ClientSelect, Field, Input, Select, Loading, Empty, IconBtn, Progress, useAction, useForm } from '../../components/ui'
 
 export default function Timesheet() {
-  const { user, can, member, isAdmin } = useAuth()
+  const { user, has, member, isAdmin } = useAuth()
   const [who, setWho] = useState(user.id)
   const [week, setWeek] = useState(() => { const d = new Date(); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); return d })
   const days = Array.from({ length: 7 }, (_, i) => { const d = new Date(week); d.setDate(week.getDate() + i); return toISO(d) })
@@ -34,12 +34,12 @@ export default function Timesheet() {
   }, 'Logged') }
   const del = (x) => run(async () => { await q(supabase.from('time_logs').delete().eq('id', x.id)); reload() })
   const shift = (k) => setWeek((w) => { const d = new Date(w); d.setDate(d.getDate() + 7 * k); return d })
-  const canEdit = who === user.id || isAdmin
+  const canEdit = who === user.id || has('team.manage')
 
   return (
     <>
       <PageHeader title="Timesheet" subtitle="Log time against tasks and clients — it powers utilisation and client profitability reports."
-        actions={can('marketer') && <MemberSelect value={who} onChange={(v) => setWho(v || user.id)} placeholder="Me" />} />
+        actions={has('timesheet.all') && <MemberSelect value={who} onChange={(v) => setWho(v || user.id)} placeholder="Me" />} />
       <div className="filters">
         <IconBtn icon={ChevronLeft} title="Previous week" onClick={() => shift(-1)} />
         <b>{date(days[0], { day: 'numeric', month: 'short' })} – {date(days[6])}</b>

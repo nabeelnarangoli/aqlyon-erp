@@ -12,7 +12,7 @@ import {
 } from '../../components/ui'
 
 export default function Clients() {
-  const { can } = useAuth()
+  const { has } = useAuth()
   const nav = useNavigate()
   const [search, setSearch] = useState('')
   const [status, setStatus] = useState('active')
@@ -21,8 +21,8 @@ export default function Clients() {
   const { data, loading, error, reload } = useData(async () => {
     const [clients, packs, tasks] = await Promise.all([
       q(supabase.from('clients').select('*').order('name')),
-      can('marketer', 'finance') ? q(supabase.from('packages').select('client_id, fee, billing_type, status').eq('status', 'active')) : [],
-      can('marketer', 'designer') ? q(supabase.from('design_tasks').select('client_id, status').not('status', 'in', '(delivered,cancelled)')) : []
+      has('packages.view', 'packages.manage') ? q(supabase.from('packages').select('client_id, fee, billing_type, status').eq('status', 'active')) : [],
+      has('tasks.view', 'tasks.work', 'tasks.manage') ? q(supabase.from('design_tasks').select('client_id, status').not('status', 'in', '(delivered,cancelled)')) : []
     ])
     return clients.map((c) => ({
       ...c,
@@ -40,21 +40,21 @@ export default function Clients() {
 
   return (
     <>
-      <PageHeader title="Clients" subtitle={`${rows.length} clients${can('marketer', 'finance') ? ` · ${money(totalMrr)} monthly recurring` : ''}`}
+      <PageHeader title="Clients" subtitle={`${rows.length} clients${has('packages.view', 'packages.manage') ? ` · ${money(totalMrr)} monthly recurring` : ''}`}
         actions={<>
           <Button variant="outline" icon={Download} onClick={() => downloadCSV('clients.csv', rows.map((c) => ({ code: c.code, name: c.name, contact: c.contact_person, phone: c.phone, email: c.email, city: c.city, industry: c.industry, status: c.status, monthly_fee: c.mrr })))}>Export</Button>
-          {can('marketer') && <Button icon={Plus} onClick={() => setAdding(true)}>New client</Button>}
+          {has('clients.manage') && <Button icon={Plus} onClick={() => setAdding(true)}>New client</Button>}
         </>} />
       <div className="filters">
         <SearchInput value={search} onChange={setSearch} placeholder="Search clients…" />
         <Select options={CLIENT_STATUS} value={status} onChange={(v) => setStatus(v || '')} placeholder="All statuses" />
-        <MemberSelect roles={['admin', 'marketer']} value={am} onChange={(v) => setAm(v || '')} placeholder="All account managers" />
+        <MemberSelect perm={['leads.manage', 'clients.manage']} value={am} onChange={(v) => setAm(v || '')} placeholder="All account managers" />
       </div>
       <ErrorBox error={error} onRetry={reload} />
       {loading ? <Loading /> : rows.length === 0 ? <Empty icon={Building2} title="No clients found">Convert a won lead or add a client directly.</Empty> : (
         <div className="card table-wrap">
           <table className="table">
-            <thead><tr><th>Client</th><th>Contact</th><th>Industry</th><th>Status</th><th>Account manager</th>{can('marketer', 'designer') && <th className="num">Open tasks</th>}{can('marketer', 'finance') && <th className="num">Monthly fee</th>}<th>Since</th></tr></thead>
+            <thead><tr><th>Client</th><th>Contact</th><th>Industry</th><th>Status</th><th>Account manager</th>{has('tasks.view', 'tasks.work', 'tasks.manage') && <th className="num">Open tasks</th>}{has('packages.view', 'packages.manage') && <th className="num">Monthly fee</th>}<th>Since</th></tr></thead>
             <tbody>
               {rows.map((c) => (
                 <tr key={c.id} className="click" onClick={() => nav(`/clients/${c.id}`)}>
@@ -63,8 +63,8 @@ export default function Clients() {
                   <td>{c.industry || '—'}</td>
                   <td><StatusBadge list={CLIENT_STATUS} value={c.status} /></td>
                   <td><Member id={c.account_manager_id} size={22} /></td>
-                  {can('marketer', 'designer') && <td className="num">{c.openTasks || '—'}</td>}
-                  {can('marketer', 'finance') && <td className="num">{c.mrr ? money(c.mrr) : '—'}</td>}
+                  {has('tasks.view', 'tasks.work', 'tasks.manage') && <td className="num">{c.openTasks || '—'}</td>}
+                  {has('packages.view', 'packages.manage') && <td className="num">{c.mrr ? money(c.mrr) : '—'}</td>}
                   <td className="nowrap">{date(c.onboarded_on)}</td>
                 </tr>
               ))}
@@ -114,7 +114,7 @@ export function ClientModal({ client = {}, onClose, onSaved }) {
         <Field label="Address" span={2}><Input value={f.address} onChange={set('address')} /></Field>
         <Field label="Industry"><Select options={INDUSTRIES} value={f.industry} onChange={set('industry')} /></Field>
         <Field label="Status"><Select placeholder={false} options={CLIENT_STATUS} value={f.status} onChange={set('status')} /></Field>
-        <Field label="Account manager"><MemberSelect roles={['admin', 'marketer']} value={f.account_manager_id} onChange={set('account_manager_id')} /></Field>
+        <Field label="Account manager"><MemberSelect perm={['leads.manage', 'clients.manage']} value={f.account_manager_id} onChange={set('account_manager_id')} /></Field>
         <Field label="Client since"><Input type="date" value={f.onboarded_on} onChange={set('onboarded_on')} /></Field>
         <div className="field span-2"><h3 className="mt">Online presence</h3></div>
         <Field label="Instagram"><Input value={f.instagram} onChange={set('instagram')} placeholder="@handle or URL" /></Field>

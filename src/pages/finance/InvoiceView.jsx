@@ -14,7 +14,7 @@ import { MoneyFlow } from './Suppliers'
 export default function InvoiceView({ kind }) {
   const { id } = useParams()
   const nav = useNavigate()
-  const { settings, can } = useAuth()
+  const { settings, has } = useAuth()
   const { confirm } = useToast()
   const [editing, setEditing] = useState(false)
   const [paying, setPaying] = useState(null)
@@ -27,8 +27,8 @@ export default function InvoiceView({ kind }) {
   const d = doc.data
   const c = d.clients
   const st = settings || {}
-  const isFin = can('finance')
-  const canEdit = kind === 'invoice' ? isFin : can('finance', 'marketer')
+  const isFin = has('invoices.manage')
+  const canEdit = kind === 'invoice' ? isFin : has('quotations.manage')
   const balance = Number(d.total) - Number(d.amount_paid || 0)
   const title = kind === 'invoice' ? 'INVOICE' : 'QUOTATION'
   const billTo = c ? [c.name, c.contact_person, c.address || c.city, c.phone, c.email].filter(Boolean) : (d.bill_to || '').split('\n')
@@ -82,8 +82,8 @@ export default function InvoiceView({ kind }) {
           {canEdit && <Button variant="outline" icon={Copy} onClick={duplicate}>Duplicate</Button>}
           {canEdit && d.status === 'draft' && <Button variant="outline" icon={Send} onClick={() => setStatus('sent', 'Marked as sent')}>Mark sent</Button>}
           {kind === 'quote' && canEdit && !['accepted', 'rejected'].includes(d.status) && <Button variant="outline" icon={XCircle} onClick={() => setStatus('rejected', 'Marked rejected')}>Rejected</Button>}
-          {kind === 'quote' && can('finance') && d.status !== 'rejected' && <Button icon={FileCheck2} onClick={toInvoice} loading={busy}>Accept → Invoice</Button>}
-          {kind === 'quote' && !can('finance') && canEdit && d.status !== 'accepted' && <Button icon={CheckCircle2} onClick={() => setStatus('accepted', 'Marked accepted — finance can invoice it')}>Accepted</Button>}
+          {kind === 'quote' && has('invoices.manage') && d.status !== 'rejected' && <Button icon={FileCheck2} onClick={toInvoice} loading={busy}>Accept → Invoice</Button>}
+          {kind === 'quote' && !has('invoices.manage') && canEdit && d.status !== 'accepted' && <Button icon={CheckCircle2} onClick={() => setStatus('accepted', 'Marked accepted — finance can invoice it')}>Accepted</Button>}
           {kind === 'invoice' && isFin && !['paid', 'cancelled'].includes(d.status) && <Button icon={Wallet} onClick={() => setPaying({})}>Record payment</Button>}
           {canEdit && !['paid', 'cancelled'].includes(d.status) && <Button variant="dark" icon={Pencil} onClick={() => setEditing(true)}>Edit</Button>}
           {kind === 'invoice' && isFin && !['cancelled', 'paid'].includes(d.status) && Number(d.amount_paid) === 0 && <IconBtn icon={Ban} title="Cancel invoice" onClick={() => setStatus('cancelled', 'Invoice cancelled')} />}
@@ -149,7 +149,7 @@ export default function InvoiceView({ kind }) {
           </div>
         </Card>
       )}
-      {kind === 'invoice' && can('finance', 'marketer') && <MoneyFlow invoice={d} />}
+      {kind === 'invoice' && has('suppliers.view', 'suppliers.manage', 'invoices.manage') && <MoneyFlow invoice={d} />}
       {editing && <DocEditor kind={kind} doc={d} onClose={() => setEditing(false)} onSaved={() => { setEditing(false); doc.reload() }} />}
       {paying && <PaymentModal invoice={d} payment={paying.id ? paying : null} onClose={() => setPaying(null)} onSaved={() => { setPaying(null); pays.reload(); doc.reload() }} />}
     </>
