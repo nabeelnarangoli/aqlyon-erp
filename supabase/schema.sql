@@ -1093,6 +1093,11 @@ alter table public.expenses add column if not exists paid_by uuid references pub
 alter table public.expenses add column if not exists reimbursement_id uuid references public.reimbursements(id) on delete set null;
 create index if not exists idx_exp_paid_by on public.expenses(paid_by) where paid_by is not null;
 create index if not exists idx_exp_reimb on public.expenses(reimbursement_id);
+-- supplier payments can be made from someone's own account too
+alter table public.supplier_payments add column if not exists paid_by uuid references public.profiles(id) on delete restrict;
+alter table public.supplier_payments add column if not exists reimbursement_id uuid references public.reimbursements(id) on delete set null;
+create index if not exists idx_sp_paid_by on public.supplier_payments(paid_by) where paid_by is not null;
+create index if not exists idx_sp_reimb on public.supplier_payments(reimbursement_id);
 
 create or replace function public.expense_reimb_guard() returns trigger language plpgsql as $$
 begin
@@ -1110,26 +1115,36 @@ end $$;
 drop trigger if exists trg_expense_reimb_guard on public.expenses;
 create trigger trg_expense_reimb_guard before insert or update or delete on public.expenses
   for each row execute function public.expense_reimb_guard();
+drop trigger if exists trg_sp_reimb_guard on public.supplier_payments;
+create trigger trg_sp_reimb_guard before insert or update or delete on public.supplier_payments
+  for each row execute function public.expense_reimb_guard();
 
--- repay selected out-of-pocket expenses to one person in a single payment
+-- repay selected out-of-pocket expenses / supplier payments to one person in a single payment
+drop function if exists public.repay_expenses(uuid, uuid[], date, text, text, text);
 create or replace function public.repay_expenses(p_person uuid, p_expense_ids uuid[], p_paid_on date default current_date,
-  p_method text default 'Bank Transfer', p_reference text default null, p_note text default null)
+  p_method text default 'Bank Transfer', p_reference text default null, p_note text default null,
+  p_supplier_payment_ids uuid[] default '{}')
 returns uuid language plpgsql security definer set search_path = public as $$
-declare n int; tot numeric; rid uuid;
+declare n int; n2 int; tot numeric; tot2 numeric; rid uuid;
 begin
   if not public.has_perm('expenses.manage', 'payments.manage') then raise exception 'Not allowed'; end if;
+  p_expense_ids := coalesce(p_expense_ids, '{}'); p_supplier_payment_ids := coalesce(p_supplier_payment_ids, '{}');
   select count(*), coalesce(sum(amount), 0) into n, tot from public.expenses
    where id = any(p_expense_ids) and paid_by = p_person and reimbursement_id is null;
-  if n = 0 or n <> coalesce(array_length(p_expense_ids, 1), 0) then
-    raise exception 'Some of the selected expenses are not payable to this person (already repaid or paid by someone else).';
+  select count(*), coalesce(sum(amount), 0) into n2, tot2 from public.supplier_payments
+   where id = any(p_supplier_payment_ids) and paid_by = p_person and reimbursement_id is null;
+  if n + n2 = 0 or n <> coalesce(array_length(p_expense_ids, 1), 0) or n2 <> coalesce(array_length(p_supplier_payment_ids, 1), 0) then
+    raise exception 'Some of the selected items are not payable to this person (already repaid or paid by someone else).';
   end if;
+  tot := tot + tot2;
   insert into public.reimbursements(person_id, paid_on, amount, method, reference, note)
   values (p_person, coalesce(p_paid_on, current_date), tot, coalesce(p_method, 'Bank Transfer'), nullif(p_reference, ''), nullif(p_note, ''))
   returning id into rid;
   update public.expenses set reimbursement_id = rid where id = any(p_expense_ids);
+  update public.supplier_payments set reimbursement_id = rid where id = any(p_supplier_payment_ids);
   return rid;
 end $$;
-grant execute on function public.repay_expenses(uuid, uuid[], date, text, text, text) to authenticated;
+grant execute on function public.repay_expenses(uuid, uuid[], date, text, text, text, uuid[]) to authenticated;
 
 -- every money movement in one place (in = client payments, out = supplier payments + expenses)
 create or replace view public.v_money_movements with (security_invoker = true) as
@@ -1141,6 +1156,7 @@ union all
 select sp.id, sp.paid_on, 'out', 'Supplier payment (' || sp.kind || ')', sp.amount, sp.method, sp.reference, sp.note,
        null, null, sp.supplier_id, s.name, null, null, sp.bill_id, b.number
 from public.supplier_payments sp join public.suppliers s on s.id = sp.supplier_id left join public.supplier_bills b on b.id = sp.bill_id
+where sp.paid_by is null   -- paid from someone's own account: cash leaves when they are repaid
 union all
 select e.id, e.spent_on, 'out', 'Expense · ' || e.category, e.amount, e.method, e.vendor, e.description,
        e.client_id, c.name, null, null, null, null, null, null
@@ -1371,7 +1387,7 @@ create policy p_sb_read  on public.supplier_bills for select to authenticated us
 create policy p_sb_rw    on public.supplier_bills for all to authenticated using (public.has_perm('suppliers.manage')) with check (public.has_perm('suppliers.manage'));
 create policy p_sba_read on public.supplier_bill_allocations for select to authenticated using (public.has_perm('suppliers.view', 'suppliers.manage', 'suppliers.pay', 'reports.clients', 'invoices.view'));
 create policy p_sba_rw   on public.supplier_bill_allocations for all to authenticated using (public.has_perm('suppliers.manage')) with check (public.has_perm('suppliers.manage'));
-create policy p_sp_read  on public.supplier_payments for select to authenticated using (public.has_perm('suppliers.view', 'suppliers.pay', 'payments.manage', 'reports.finance', 'invoices.view'));
+create policy p_sp_read  on public.supplier_payments for select to authenticated using (public.has_perm('suppliers.view', 'suppliers.pay', 'payments.manage', 'reports.finance', 'invoices.view', 'expenses.manage') or paid_by = auth.uid());
 create policy p_sp_rw    on public.supplier_payments for all to authenticated using (public.has_perm('suppliers.pay')) with check (public.has_perm('suppliers.pay'));
 
 -- notifications: own only

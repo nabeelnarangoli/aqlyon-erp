@@ -177,6 +177,17 @@ do $$ begin begin delete from expenses where vendor='Adobe'; raise exception 'FA
 delete from reimbursements;
 select 'undo repayment → payable again (5030)' t, sum(amount) from expenses where paid_by is not null and reimbursement_id is null;
 reset role;
+-- supplier paid from founder's own account: bill counts as paid, founder is owed, repay both kinds at once
+select pg_temp.as_user('00000000-0000-0000-0000-00000000000d');
+insert into supplier_bills(supplier_id, title, items) select id, 'Memento', '[{"description":"Memento","qty":1,"rate":12500}]' from suppliers limit 1;
+insert into supplier_payments(bill_id, amount, kind, paid_by) select id, 5000.50, 'advance', (select id from profiles where email='admin@aq.test') from supplier_bills where title='Memento';
+select 'bill paid by founder' t, amount_paid, status from supplier_bills where title='Memento';
+select 'founder supplier pay not in cash (0)' t, count(*) from v_money_movements where amount = 5000.50;
+select repay_expenses((select id from profiles where email='admin@aq.test'), array(select id from expenses where vendor='Adobe'), current_date, 'UPI', null, null,
+  array(select id from supplier_payments where amount=5000.50)) is not null as repaid_both;
+select 'combined repayment (9230.50)' t, amount from reimbursements;
+delete from reimbursements;
+reset role;
 select pg_temp.as_user('00000000-0000-0000-0000-00000000000c');
 do $$ begin begin perform repay_expenses((select id from profiles where email='admin@aq.test'), array(select id from expenses where vendor='Adobe'));
   raise exception 'FAIL designer repaid'; exception when raise_exception then if sqlerrm like 'FAIL%' then raise; end if; raise notice 'ok: %', sqlerrm; end; end $$;

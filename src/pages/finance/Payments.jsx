@@ -22,7 +22,7 @@ export default function Payments() {
   const { data, loading, reload } = useData(async () => {
     const [inc, out, exp, reimb] = await Promise.all([
       q(supabase.from('payments').select('*, invoices(number), clients(name)').gte('paid_on', from).lte('paid_on', to).order('paid_on', { ascending: false })),
-      q(supabase.from('supplier_payments').select('*, suppliers(name), supplier_bills(id,number,title, supplier_bill_allocations(client_id, amount, clients(name)))').gte('paid_on', from).lte('paid_on', to).order('paid_on', { ascending: false })),
+      q(supabase.from('supplier_payments').select('*, suppliers(name), supplier_bills(id,number,title, supplier_bill_allocations(client_id, amount, clients(name)))').is('paid_by', null).gte('paid_on', from).lte('paid_on', to).order('paid_on', { ascending: false })),
       // costs paid from a founder's / staff member's own account leave company cash only when repaid
       q(supabase.from('expenses').select('*, clients(name)').is('paid_by', null).gte('spent_on', from).lte('spent_on', to).order('spent_on', { ascending: false })),
       q(supabase.from('reimbursements').select('*').gte('paid_on', from).lte('paid_on', to).order('paid_on', { ascending: false }))

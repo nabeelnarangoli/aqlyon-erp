@@ -74,7 +74,7 @@ function PnL({ from, to }) {
       q(supabase.from('payments').select('paid_on,amount').gte('paid_on', from).lte('paid_on', to)),
       q(supabase.from('expenses').select('spent_on,amount,category,rebillable,supplier_id,vendor,paid_by').gte('spent_on', from).lte('spent_on', to)),
       q(supabase.from('supplier_bills').select('order_date,total,status,supplier_id, suppliers(name)').neq('status', 'cancelled').gte('order_date', from).lte('order_date', to)),
-      q(supabase.from('supplier_payments').select('paid_on,amount').gte('paid_on', from).lte('paid_on', to)),
+      q(supabase.from('supplier_payments').select('paid_on,amount,paid_by').gte('paid_on', from).lte('paid_on', to)),
       q(supabase.from('reimbursements').select('paid_on,amount').gte('paid_on', from).lte('paid_on', to)).catch(() => [])
     ])
     return { inv, pay, exp, sb, sp, rb }
@@ -88,7 +88,7 @@ function PnL({ from, to }) {
       Collected: data.pay.filter((x) => x.paid_on.startsWith(k)).reduce((a, x) => a + Number(x.amount), 0),
       Expenses: data.exp.filter((x) => x.spent_on.startsWith(k)).reduce((a, x) => a + Number(x.amount), 0),
       Suppliers: data.sb.filter((x) => x.order_date.startsWith(k)).reduce((a, x) => a + Number(x.total), 0),
-      SupPaid: data.sp.filter((x) => x.paid_on.startsWith(k)).reduce((a, x) => a + Number(x.amount), 0),
+      SupPaid: data.sp.filter((x) => !x.paid_by && x.paid_on.startsWith(k)).reduce((a, x) => a + Number(x.amount), 0),
       // cash actually paid for expenses: company-account expenses + repayments to founders / staff
       ExpPaid: data.exp.filter((x) => !x.paid_by && x.spent_on.startsWith(k)).reduce((a, x) => a + Number(x.amount), 0) + data.rb.filter((x) => x.paid_on.startsWith(k)).reduce((a, x) => a + Number(x.amount), 0)
     }

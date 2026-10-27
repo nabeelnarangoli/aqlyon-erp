@@ -24,7 +24,13 @@ export default function Expenses() {
   const [, run] = useAction()
   const { data, loading, reload } = useData(() => q(supabase.from('expenses').select('*, clients(name)').gte('spent_on', from).lte('spent_on', to).order('spent_on', { ascending: false })), [from, to], [])
   // out-of-pocket payments still owed to founders / staff (all dates, not just this period)
-  const owed = useData(() => q(supabase.from('expenses').select('id,paid_by,amount').not('paid_by', 'is', null).is('reimbursement_id', null)), [data], [])
+  const owed = useData(async () => {
+    const [e, sp] = await Promise.all([
+      q(supabase.from('expenses').select('id,paid_by,amount').not('paid_by', 'is', null).is('reimbursement_id', null)),
+      q(supabase.from('supplier_payments').select('id,paid_by,amount').not('paid_by', 'is', null).is('reimbursement_id', null))
+    ])
+    return [...e, ...sp]
+  }, [data], [])
   const owedBy = useMemo(() => Object.values(owed.data.reduce((a, e) => { a[e.paid_by] ||= { id: e.paid_by, total: 0, n: 0 }; a[e.paid_by].total += Number(e.amount); a[e.paid_by].n++; return a }, {})).sort((a, b) => b.total - a.total), [owed.data])
   const owedTotal = owedBy.reduce((a, x) => a + x.total, 0)
   const rows = useMemo(() => data.filter((e) => (!cat || e.category === cat) && (!show || (show === 'payable' ? e.paid_by && !e.reimbursement_id : show === 'own' ? e.paid_by : !e.paid_by))), [data, cat, show])
@@ -94,7 +100,7 @@ export default function Expenses() {
         <Card title="Payable to founder / staff" actions={<Button variant="ghost" size="sm" icon={HandCoins} onClick={() => setRepay({})}>Repayments</Button>}>
           {owedBy.length === 0 ? <p className="faint small">Nothing owed. When someone pays a company cost from their own account, choose them under “Paid from” on the expense.</p> : owedBy.map((x) => (
             <div key={x.id} className="row between" style={{ marginBottom: 10, gap: 8 }}>
-              <div><div className="strong">{member(x.id)?.full_name || 'Team member'}</div><div className="tiny faint">{x.n} unpaid expense{x.n > 1 ? 's' : ''}</div></div>
+              <div><div className="strong">{member(x.id)?.full_name || 'Team member'}</div><div className="tiny faint">{x.n} unpaid item{x.n > 1 ? 's' : ''}</div></div>
               <div className="row gap-s"><b style={{ color: 'var(--orange, #c2410c)' }}>{money(x.total)}</b><Button size="sm" onClick={() => setRepay({ person: x.id })}>Repay</Button></div>
             </div>
           ))}
@@ -183,18 +189,28 @@ export function RepayModal({ person: initial, onClose, onDone }) {
   const [pick, setPick] = useState(null)
   const [f, set] = useForm({ paid_on: todayISO(), method: 'Bank Transfer', reference: '', note: '' })
   const [busy, run] = useAction()
-  const open = useData(() => person ? q(supabase.from('expenses').select('*').eq('paid_by', person).is('reimbursement_id', null).order('spent_on')) : [], [person], [])
+  const open = useData(async () => {
+    if (!person) return []
+    const [e, sp] = await Promise.all([
+      q(supabase.from('expenses').select('*').eq('paid_by', person).is('reimbursement_id', null)),
+      q(supabase.from('supplier_payments').select('*, suppliers(name), supplier_bills(number,title)').eq('paid_by', person).is('reimbursement_id', null))
+    ])
+    return [...e.map((x) => ({ ...x, src: 'exp', d: x.spent_on, who: x.vendor, what: x.category, sub: x.description })),
+      ...sp.map((x) => ({ ...x, src: 'sp', d: x.paid_on, who: x.suppliers?.name, what: `Supplier payment · ${x.kind}`, sub: [x.supplier_bills?.number, x.supplier_bills?.title].filter(Boolean).join(' · ') }))]
+      .sort((a, b) => a.d.localeCompare(b.d))
+  }, [person], [])
   const hist = useData(() => q(supabase.from('reimbursements').select('*').order('paid_on', { ascending: false }).limit(50)), [], [])
   const chosen = pick || new Set(open.data.map((e) => e.id))
   const total = open.data.filter((e) => chosen.has(e.id)).reduce((a, e) => a + Number(e.amount), 0)
   const toggle = (id) => { const n = new Set(chosen); n.has(id) ? n.delete(id) : n.add(id); setPick(n) }
   const pay = () => run(async () => {
-    if (!chosen.size) throw new Error('Tick the expenses you are repaying')
-    await q(supabase.rpc('repay_expenses', { p_person: person, p_expense_ids: [...chosen], p_paid_on: f.paid_on, p_method: f.method, p_reference: f.reference || null, p_note: f.note || null }))
+    if (!chosen.size) throw new Error('Tick the items you are repaying')
+    const sel = open.data.filter((e) => chosen.has(e.id))
+    await q(supabase.rpc('repay_expenses', { p_person: person, p_expense_ids: sel.filter((x) => x.src === 'exp').map((x) => x.id), p_supplier_payment_ids: sel.filter((x) => x.src === 'sp').map((x) => x.id), p_paid_on: f.paid_on, p_method: f.method, p_reference: f.reference || null, p_note: f.note || null }))
     setPick(null); open.reload(); hist.reload(); onDone?.()
   }, `Repaid ${money2(total)} to ${member(person)?.full_name || 'team member'}`)
   const undo = async (r) => {
-    if (!(await confirm(`Undo the repayment of ${money2(r.amount)} to ${member(r.person_id)?.full_name || 'team member'}? Its expenses become payable again.`, { danger: true, okText: 'Undo repayment' }))) return
+    if (!(await confirm(`Undo the repayment of ${money2(r.amount)} to ${member(r.person_id)?.full_name || 'team member'}? What it covered becomes payable again.`, { danger: true, okText: 'Undo repayment' }))) return
     run(async () => { await q(supabase.from('reimbursements').delete().eq('id', r.id)); open.reload(); hist.reload(); onDone?.() }, 'Repayment undone')
   }
   const shown = hist.data.filter((r) => !person || r.person_id === person)
@@ -209,12 +225,12 @@ export function RepayModal({ person: initial, onClose, onDone }) {
       </div>
       {person && (open.loading ? <Loading /> : open.data.length === 0 ? <p className="faint small mt">Nothing is payable to {member(person)?.full_name || 'this person'}.</p> : (
         <div className="table-wrap mt"><table className="table">
-          <thead><tr><th style={{ width: 30 }} /><th>Date</th><th>Paid to</th><th>Category</th><th className="num">Amount</th></tr></thead>
+          <thead><tr><th style={{ width: 30 }} /><th>Date</th><th>Paid to</th><th>For</th><th className="num">Amount</th></tr></thead>
           <tbody>{open.data.map((e) => (
             <tr key={e.id} className="click" onClick={() => toggle(e.id)}>
               <td><input type="checkbox" checked={chosen.has(e.id)} readOnly /></td>
-              <td className="nowrap">{date(e.spent_on)}</td><td><div className="cell-title">{e.vendor}</div>{e.description && <div className="cell-sub">{e.description}</div>}</td>
-              <td className="small">{e.category}</td><td className="num strong">{money2(e.amount)}</td>
+              <td className="nowrap">{date(e.d)}</td><td><div className="cell-title">{e.who}</div>{e.sub && <div className="cell-sub">{e.sub}</div>}</td>
+              <td className="small">{e.what}</td><td className="num strong">{money2(e.amount)}</td>
             </tr>))}</tbody>
           <tfoot><tr><td colSpan={4}>Repaying {chosen.size} of {open.data.length}</td><td className="num">{money2(total)}</td></tr></tfoot>
         </table></div>

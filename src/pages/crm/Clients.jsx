@@ -15,7 +15,7 @@ export default function Clients() {
   const { has } = useAuth()
   const nav = useNavigate()
   const [search, setSearch] = useState('')
-  const [status, setStatus] = useState('active')
+  const [status, setStatus] = useState('current')
   const [am, setAm] = useState('')
   const [adding, setAdding] = useState(false)
   const { data, loading, error, reload } = useData(async () => {
@@ -34,7 +34,7 @@ export default function Clients() {
   const rows = useMemo(() => data.filter((c) => {
     const s = search.toLowerCase()
     return (!s || [c.name, c.contact_person, c.phone, c.code, c.city, c.industry].some((v) => v?.toLowerCase().includes(s)))
-      && (!status || c.status === status) && (!am || c.account_manager_id === am)
+      && (!status || (status === 'current' ? ['active', 'onboarding'].includes(c.status) : c.status === status)) && (!am || c.account_manager_id === am)
   }), [data, search, status, am])
   const totalMrr = rows.reduce((a, c) => a + c.mrr, 0)
 
@@ -47,7 +47,7 @@ export default function Clients() {
         </>} />
       <div className="filters">
         <SearchInput value={search} onChange={setSearch} placeholder="Search clients…" />
-        <Select options={CLIENT_STATUS} value={status} onChange={(v) => setStatus(v || '')} placeholder="All statuses" />
+        <Select options={[{ id: 'current', label: 'Active + onboarding' }, ...CLIENT_STATUS]} value={status} onChange={(v) => setStatus(v || '')} placeholder="All statuses" />
         <MemberSelect perm={['leads.manage', 'clients.manage']} value={am} onChange={(v) => setAm(v || '')} placeholder="All account managers" />
       </div>
       <ErrorBox error={error} onRetry={reload} />

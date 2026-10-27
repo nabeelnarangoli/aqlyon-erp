@@ -7,7 +7,7 @@ import { useAuth } from '../../lib/auth'
 import { PAYMENT_METHODS } from '../../lib/constants'
 import { money, money2, date, todayISO, addDays, waLink, downloadCSV, daysFrom } from '../../lib/format'
 import {
-  PageHeader, Button, Badge, Stat, Card, Modal, Field, Input, Select, Textarea, ClientSelect, SearchInput, Loading, Empty, IconBtn, Tabs,
+  PageHeader, Button, Badge, Stat, Card, Modal, Field, Input, Select, Textarea, ClientSelect, MemberSelect, SearchInput, Loading, Empty, IconBtn, Tabs,
   useAction, useForm, useToast, useClients
 } from '../../components/ui'
 
@@ -120,7 +120,7 @@ function SupplierDetail({ id, onBack }) {
   const inRange = (d) => d >= from && d <= to
   const lines = [
     ...live.filter((b) => inRange(b.order_date)).map((b) => ({ d: b.order_date, k: 'b' + b.id, type: 'Work order', ref: b.number, text: b.title, billed: Number(b.total), paid: 0, open: () => setOrder({ open: b.id }) })),
-    ...pays.data.filter((p) => inRange(p.paid_on)).map((p) => ({ d: p.paid_on, k: 'p' + p.id, type: `Payment · ${p.kind}`, ref: p.supplier_bills?.number, text: [p.method, p.reference, p.note].filter(Boolean).join(' · '), billed: 0, paid: Number(p.amount), open: p.bill_id && (() => setOrder({ open: p.bill_id })) })),
+    ...pays.data.filter((p) => inRange(p.paid_on)).map((p) => ({ d: p.paid_on, k: 'p' + p.id, type: `Payment · ${p.kind}`, ref: p.supplier_bills?.number, text: [p.method, p.reference, p.note, p.paid_by && `paid by ${member(p.paid_by)?.full_name || 'team member'}${p.reimbursement_id ? ' (repaid)' : ' (repayment pending)'}`].filter(Boolean).join(' · '), billed: 0, paid: Number(p.amount), open: p.bill_id && (() => setOrder({ open: p.bill_id })) })),
     ...exps.data.filter((e) => inRange(e.spent_on)).map((e) => ({ d: e.spent_on, k: 'e' + e.id, type: `Expense · ${e.category}`, ref: '', text: [e.description, e.clients?.name && `for ${e.clients.name}`, e.method, e.paid_by && `paid by ${member(e.paid_by)?.full_name || 'team member'}${e.reimbursement_id ? ' (repaid)' : ' (repayment pending)'}`].filter(Boolean).join(' · '), billed: Number(e.amount), paid: Number(e.amount) }))
   ].sort((x, y) => x.d.localeCompare(y.d) || (x.billed ? -1 : 1))
   let bal = opening
@@ -351,7 +351,7 @@ export function WorkOrderModal({ order = {}, onClose, onSaved }) {
 
 /* =========================================================== Work order detail */
 export function WorkOrderView({ id, onClose }) {
-  const { has } = useAuth()
+  const { has, member } = useAuth()
   const { confirm } = useToast()
   const [editing, setEditing] = useState(false)
   const [paying, setPaying] = useState(null)
@@ -409,7 +409,7 @@ export function WorkOrderView({ id, onClose }) {
         {pays.data.length === 0 ? <p className="faint small">Nothing paid yet.</p> : (
           <div className="list">{pays.data.map((p) => (
             <div key={p.id} className="list-item">
-              <div className="grow"><b>{money2(p.amount)}</b> <Badge tone={p.kind === 'final' ? 'green' : 'blue'}>{tone(PAY_KIND, p.kind).label}</Badge> <span className="small muted">{p.method}{p.reference && ` · ${p.reference}`}</span>{p.note && <div className="small faint">{p.note}</div>}</div>
+              <div className="grow"><b>{money2(p.amount)}</b> <Badge tone={p.kind === 'final' ? 'green' : 'blue'}>{tone(PAY_KIND, p.kind).label}</Badge> <span className="small muted">{p.method}{p.reference && ` · ${p.reference}`}</span>{p.paid_by && <> <Badge tone={p.reimbursement_id ? 'green' : 'orange'}>{p.reimbursement_id ? `Paid by ${(member(p.paid_by)?.full_name || 'team member').split(' ')[0]} · repaid` : `Payable to ${(member(p.paid_by)?.full_name || 'team member').split(' ')[0]}`}</Badge></>}{p.note && <div className="small faint">{p.note}</div>}</div>
               <span className="muted small">{date(p.paid_on)}</span>
               {isFin && <IconBtn icon={Trash2} size={14} title="Remove" onClick={() => delPay(p)} />}
             </div>))}</div>
@@ -424,14 +424,14 @@ export function WorkOrderView({ id, onClose }) {
 }
 
 export function SupplierPaymentModal({ bill, preset = {}, onClose, onSaved }) {
-  const [f, set] = useForm({ paid_on: todayISO(), amount: '', kind: 'advance', method: 'UPI', reference: '', note: '', ...preset })
+  const [f, set] = useForm({ paid_on: todayISO(), amount: '', kind: 'advance', method: 'UPI', reference: '', note: '', paid_by: '', ...preset })
   const [busy, run] = useAction()
   const balance = Number(bill.total) - Number(bill.amount_paid)
   const save = (e) => { e.preventDefault(); run(async () => {
     const amount = Number(f.amount)
     if (!(amount > 0)) throw new Error('Enter the amount paid')
     if (amount > balance + 0.5) throw new Error(`That is more than the balance of ${money2(balance)}`)
-    await q(supabase.from('supplier_payments').insert({ bill_id: bill.id, supplier_id: bill.supplier_id, paid_on: f.paid_on, amount, kind: f.kind, method: f.method, reference: f.reference || null, note: f.note || null }))
+    await q(supabase.from('supplier_payments').insert({ bill_id: bill.id, supplier_id: bill.supplier_id, paid_on: f.paid_on, amount, kind: f.kind, method: f.method, reference: f.reference || null, note: f.note || null, paid_by: f.paid_by || null }))
     onSaved()
   }, 'Supplier payment recorded') }
   return (
@@ -441,6 +441,9 @@ export function SupplierPaymentModal({ bill, preset = {}, onClose, onSaved }) {
         <Field label="Payment type"><Select placeholder={false} options={PAY_KIND} value={f.kind} onChange={(v) => { set('kind')(v); if (v === 'final') set('amount')(balance) }} /></Field>
         <Field label="Amount (₹)" required><Input type="number" min="0" step="any" value={f.amount} onChange={set('amount')} /></Field>
         <Field label="Paid on"><Input type="date" value={f.paid_on} onChange={set('paid_on')} /></Field>
+        <Field label="Paid from" hint={f.paid_by ? 'Shows as payable to this person until the company repays them (Expenses → Repay)' : undefined}>
+          <MemberSelect value={f.paid_by} onChange={set('paid_by')} placeholder="Company account" />
+        </Field>
         <Field label="Method"><Select placeholder={false} options={PAYMENT_METHODS} value={f.method} onChange={set('method')} /></Field>
         <Field label="Reference"><Input value={f.reference} onChange={set('reference')} placeholder="UPI ref / cheque no." /></Field>
         <Field label="Note"><Input value={f.note} onChange={set('note')} placeholder="e.g. Advance before starting / balance after logo delivered" /></Field>

@@ -40,7 +40,7 @@ const READ = {
   payments: ['payments.manage', 'invoices.view', 'invoices.manage', 'reports.finance'], expenses: ['expenses.manage', 'payments.manage', 'reports.finance', 'reports.clients'], reimbursements: ['expenses.manage', 'payments.manage', 'reports.finance'],
   suppliers: ['suppliers.view', 'suppliers.manage', 'suppliers.pay', 'expenses.manage', 'payments.manage', 'reports.finance'], supplier_bills: ['suppliers.view', 'suppliers.manage', 'suppliers.pay', 'reports.finance', 'reports.clients'],
   supplier_bill_allocations: ['suppliers.view', 'suppliers.manage', 'suppliers.pay', 'reports.clients', 'invoices.view'],
-  supplier_payments: ['suppliers.view', 'suppliers.pay', 'payments.manage', 'reports.finance', 'invoices.view'],
+  supplier_payments: ['suppliers.view', 'suppliers.pay', 'payments.manage', 'reports.finance', 'invoices.view', 'expenses.manage'],
   clients: ['clients.view', 'clients.manage', 'tasks.view', 'tasks.work', 'invoices.view', 'quotations.view', 'calendar.view', 'suppliers.view', 'leads.manage']
 }
 const WRITE = {
@@ -367,7 +367,7 @@ class Query {
         for (const r of rows) {
           const old = { ...r }
           guardDesigner(t, old, { ...r, ...this.payload })
-          if (t === 'expenses' && old.reimbursement_id && ((this.payload.amount !== undefined && Number(this.payload.amount) !== Number(old.amount)) || ('paid_by' in this.payload && (this.payload.paid_by || null) !== (old.paid_by || null)))) throw new Error('This expense has already been repaid. Undo the repayment first to change the amount or who paid.')
+          if ((t === 'expenses' || t === 'supplier_payments') && old.reimbursement_id && ((this.payload.amount !== undefined && Number(this.payload.amount) !== Number(old.amount)) || ('paid_by' in this.payload && (this.payload.paid_by || null) !== (old.paid_by || null)))) throw new Error('This expense has already been repaid. Undo the repayment first to change the amount or who paid.')
           Object.assign(r, this.payload)
           afterUpdate(t, old, r)
         }
@@ -380,9 +380,9 @@ class Query {
           if (T('roles').find((r) => r.id === id)?.key === 'admin') throw new Error('The Administrator role cannot be deleted')
           if (T('profiles').some((p) => p.role_id === id)) throw new Error('Move the users on this role to another role before deleting it')
         }
-        if (t === 'expenses' && T(t).some((r) => kill.has(r.id) && r.reimbursement_id)) throw new Error('This expense has already been repaid. Undo the repayment first.')
+        if ((t === 'expenses' || t === 'supplier_payments') && T(t).some((r) => kill.has(r.id) && r.reimbursement_id)) throw new Error('This expense has already been repaid. Undo the repayment first.')
         db[t] = T(t).filter((r) => !kill.has(r.id))
-        if (t === 'reimbursements') T('expenses').forEach((e) => { if (kill.has(e.reimbursement_id)) e.reimbursement_id = null })
+        if (t === 'reimbursements') [...T('expenses'), ...T('supplier_payments')].forEach((e) => { if (kill.has(e.reimbursement_id)) e.reimbursement_id = null })
         if (t === 'design_tasks') { db.task_proofs = T('task_proofs').filter((p) => !kill.has(p.task_id)); db.task_comments = T('task_comments').filter((p) => !kill.has(p.task_id)) }
         if (t === 'invoices') db.payments = T('payments').filter((p) => !kill.has(p.invoice_id))
         if (t === 'payments') [...new Set(T('invoices').map((i) => i.id))].forEach(syncInvoice)
@@ -404,9 +404,11 @@ function rpc(name, a) {
     if (name === 'staff_cost_rates') return { data: hasPerm('team.manage', 'reports.clients', 'reports.team') ? T('staff_pay').map((x) => ({ user_id: x.user_id, cost_per_hour: x.cost_per_hour })) : [], error: null }
     if (name === 'repay_expenses') {
       if (!hasPerm('expenses.manage', 'payments.manage')) throw new Error('Not allowed')
-      const ids = a.p_expense_ids || []
-      const rows = T('expenses').filter((e) => ids.includes(e.id) && e.paid_by === a.p_person && !e.reimbursement_id)
-      if (!rows.length || rows.length !== ids.length) throw new Error('Some of the selected expenses are not payable to this person (already repaid or paid by someone else).')
+      const ids = a.p_expense_ids || [], sids = a.p_supplier_payment_ids || []
+      const e1 = T('expenses').filter((e) => ids.includes(e.id) && e.paid_by === a.p_person && !e.reimbursement_id)
+      const e2 = T('supplier_payments').filter((e) => sids.includes(e.id) && e.paid_by === a.p_person && !e.reimbursement_id)
+      const rows = [...e1, ...e2]
+      if (!rows.length || e1.length !== ids.length || e2.length !== sids.length) throw new Error('Some of the selected items are not payable to this person (already repaid or paid by someone else).')
       const { data } = new Query('reimbursements').insert({ person_id: a.p_person, paid_on: a.p_paid_on || iso(new Date()), amount: rows.reduce((x, e) => x + Number(e.amount), 0), method: a.p_method || 'Bank Transfer', reference: a.p_reference || null, note: a.p_note || null }).exec()
       const r = Array.isArray(data) ? data[0] : data
       rows.forEach((e) => { e.reimbursement_id = r.id }); persist()
