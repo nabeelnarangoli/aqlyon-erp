@@ -114,7 +114,7 @@ function UserModal({ member, onClose, onSaved }) {
         <Field label="Phone"><Input value={f.phone} onChange={set('phone')} /></Field>
         <Field label="Joined on"><Input type="date" value={f.joined_on} onChange={set('joined_on')} /></Field>
         <Field label="Monthly salary (₹)" hint={cph ? `Cost per hour ≈ ₹${cph.toLocaleString('en-IN')} (salary ÷ ${Math.round(weekly * 52 / 12)} working hours a month)` : 'Private — used to work out cost per hour'}>
-          <Input type="number" min="0" value={f.monthly_salary} onChange={set('monthly_salary')} placeholder="25000" />
+          <Input type="number" step="any" min="0" value={f.monthly_salary} onChange={set('monthly_salary')} placeholder="25000" />
         </Field>
         <div className="field span-2">
           <span className="field-label">Working days</span>

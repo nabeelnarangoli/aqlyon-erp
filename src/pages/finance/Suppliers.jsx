@@ -315,8 +315,8 @@ export function WorkOrderModal({ order = {}, onClose, onSaved }) {
           <tbody>{(f.items || []).map((it, i) => (
             <tr key={i}>
               <td><input className="input" value={it.description} onChange={(e) => setItem(i, 'description', e.target.value)} placeholder="Logo design – 3 concepts" /></td>
-              <td><input className="input right" style={{ width: 70 }} type="number" min="0" value={it.qty} onChange={(e) => setItem(i, 'qty', e.target.value)} /></td>
-              <td><input className="input right" style={{ width: 110 }} type="number" min="0" value={it.rate} onChange={(e) => setItem(i, 'rate', e.target.value)} /></td>
+              <td><input className="input right" style={{ width: 70 }} type="number" step="any" min="0" value={it.qty} onChange={(e) => setItem(i, 'qty', e.target.value)} /></td>
+              <td><input className="input right" style={{ width: 110 }} type="number" step="any" min="0" value={it.rate} onChange={(e) => setItem(i, 'rate', e.target.value)} /></td>
               <td className="num strong">{money2(Number(it.qty || 0) * Number(it.rate || 0))}</td>
               <td><IconBtn icon={Trash2} size={14} title="Remove" onClick={() => setF((s) => ({ ...s, items: s.items.filter((_, j) => j !== i) }))} /></td>
             </tr>))}</tbody>
@@ -336,7 +336,7 @@ export function WorkOrderModal({ order = {}, onClose, onSaved }) {
             <tr key={i}>
               <td style={{ minWidth: 200 }}><Select options={(clients || []).map((c) => ({ id: c.id, label: c.name }))} value={a.client_id} onChange={(v) => setA(i, 'client_id', v || '')} placeholder="Select customer…" /></td>
               <td style={{ minWidth: 200 }}><Select options={invs.data.filter((x) => x.client_id === a.client_id).map((x) => ({ id: x.id, label: `${x.number} · ${money(x.total)}` }))} value={a.invoice_id} onChange={(v) => setA(i, 'invoice_id', v || '')} placeholder={a.client_id ? 'Not linked to an invoice' : '—'} disabled={!a.client_id} /></td>
-              <td><input className="input right" style={{ width: 120, marginLeft: 'auto' }} type="number" min="0" value={a.amount} onChange={(e) => setA(i, 'amount', e.target.value)} /></td>
+              <td><input className="input right" style={{ width: 120, marginLeft: 'auto' }} type="number" step="any" min="0" value={a.amount} onChange={(e) => setA(i, 'amount', e.target.value)} /></td>
               <td>{alloc.length > 1 && <IconBtn icon={Trash2} size={14} title="Remove" onClick={() => setAlloc((s) => s.filter((_, j) => j !== i))} />}</td>
             </tr>))}</tbody>
           <tfoot><tr><td colSpan={2} className="right">Allocated</td><td className="num" style={{ color: Math.abs(allocated - total) > 1 && alloc.some((a) => a.client_id) ? 'var(--red)' : undefined }}>{money2(allocated)} / {money2(total)}</td><td /></tr></tfoot>

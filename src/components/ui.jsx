@@ -127,7 +127,7 @@ export function Field({ label, hint, children, span, required }) {
     </label>
   )
 }
-export function Input(p) { return <input className="input" {...p} value={p.value ?? ''} /> }
+export function Input(p) { return <input className="input" {...(p.type === 'number' && !p.step ? { step: 'any' } : {})} {...p} value={p.value ?? ''} /> }
 export function Textarea(p) { return <textarea className="input" rows={3} {...p} value={p.value ?? ''} /> }
 export function Select({ options, placeholder, value, onChange, ...p }) {
   return (

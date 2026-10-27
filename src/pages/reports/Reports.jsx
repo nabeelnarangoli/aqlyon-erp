@@ -220,7 +220,7 @@ function ClientProfit({ from, to }) {
         <>
           {showMoney && <ChartCard title="Revenue vs delivery cost by client (top 10)" h={300}>
             <BarChart data={rows.slice(0, 10)} layout="vertical" margin={{ left: 20 }}>
-              <CartesianGrid horizontal={false} stroke="#eee" /><XAxis type="number" tickFormatter={compact} fontSize={12} /><YAxis type="category" dataKey="name" width={130} fontSize={12} />
+              <CartesianGrid horizontal={false} stroke="#eee" /><XAxis type="number" step="any" tickFormatter={compact} fontSize={12} /><YAxis type="category" dataKey="name" width={130} fontSize={12} />
               <Tooltip formatter={(v) => money(v)} /><Legend iconType="circle" wrapperStyle={{ fontSize: 12 }} />
               <Bar dataKey="revenue" name="Revenue" fill="#1ba76a" radius={[0, 4, 4, 0]} /><Bar dataKey="labour" name="Labour cost" fill="#2b1416" radius={[0, 4, 4, 0]} />
             </BarChart>

@@ -48,7 +48,7 @@ export function TaskModal({ task = {}, onClose, onSaved }) {
         <Field label="Type"><Select placeholder={false} options={TASK_TYPES} value={f.task_type} onChange={set('task_type')} /></Field>
         <Field label="Platform"><Select options={PLATFORMS} value={f.platform} onChange={set('platform')} /></Field>
         <Field label="Size / format"><Select options={SIZES} value={f.size} onChange={set('size')} /></Field>
-        <Field label="Quantity"><Input type="number" min="1" value={f.quantity} onChange={set('quantity')} /></Field>
+        <Field label="Quantity"><Input type="number" step="any" min="1" value={f.quantity} onChange={set('quantity')} /></Field>
         <Field label="Priority"><Select placeholder={false} options={PRIORITIES} value={f.priority} onChange={set('priority')} /></Field>
         <Field label="Due date"><Input type="date" value={f.due_date} onChange={set('due_date')} /></Field>
         <Field label="Assign designer" span={2} hint="Open tasks shown next to each name">
@@ -60,7 +60,7 @@ export function TaskModal({ task = {}, onClose, onSaved }) {
         <Field label="Text / copy on the design" span={3}><Textarea rows={3} value={f.copy_text} onChange={set('copy_text')} placeholder="Headline, offer, phone number, address, hashtags…" /></Field>
         <Field label="References & links" span={3}><Textarea rows={2} value={f.reference_links} onChange={set('reference_links')} placeholder="Pinterest / Instagram references, Drive folder with photos…" /></Field>
         <Field label="Estimated hours"><Input type="number" min="0" step="0.5" value={f.estimated_hours} onChange={set('estimated_hours')} /></Field>
-        <Field label="Revisions included"><Input type="number" min="0" value={f.max_revisions} onChange={set('max_revisions')} /></Field>
+        <Field label="Revisions included"><Input type="number" step="any" min="0" value={f.max_revisions} onChange={set('max_revisions')} /></Field>
         <Field label="Billing"><label className="check" style={{ height: 38 }}><input type="checkbox" checked={!!f.billable} onChange={(e) => set('billable')(e.target.checked)} />Billable client work</label></Field>
       </form>
     </Modal>

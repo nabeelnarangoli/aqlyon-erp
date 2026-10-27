@@ -87,15 +87,15 @@ export function ProjectModal({ project, onClose, onSaved, readOnly }) {
           <Field label="End"><Input type="date" value={f.end_date} onChange={set('end_date')} /></Field>
           <Field label="Owner"><MemberSelect perm={['leads.manage', 'clients.manage']} value={f.owner_id} onChange={set('owner_id')} /></Field>
           <Field label="Objective" span={3}><Input value={f.objective} onChange={set('objective')} placeholder="Leads, awareness, store visits, sales…" /></Field>
-          <Field label="Agency fee (₹)"><Input type="number" min="0" value={f.budget} onChange={set('budget')} /></Field>
-          <Field label="Ad spend (₹)"><Input type="number" min="0" value={f.ad_spend} onChange={set('ad_spend')} /></Field>
+          <Field label="Agency fee (₹)"><Input type="number" step="any" min="0" value={f.budget} onChange={set('budget')} /></Field>
+          <Field label="Ad spend (₹)"><Input type="number" step="any" min="0" value={f.ad_spend} onChange={set('ad_spend')} /></Field>
           <div />
           <div className="field span-3"><h3 className="mt">Results</h3></div>
-          <Field label="Reach"><Input type="number" min="0" value={f.reach} onChange={set('reach')} /></Field>
-          <Field label="Impressions"><Input type="number" min="0" value={f.impressions} onChange={set('impressions')} /></Field>
-          <Field label="Clicks" hint={`CTR ${ctr}`}><Input type="number" min="0" value={f.clicks} onChange={set('clicks')} /></Field>
-          <Field label="Leads generated" hint={f.leads_generated > 0 ? `Cost per lead ${money(f.ad_spend / f.leads_generated)}` : ''}><Input type="number" min="0" value={f.leads_generated} onChange={set('leads_generated')} /></Field>
-          <Field label="Conversions / sales"><Input type="number" min="0" value={f.conversions} onChange={set('conversions')} /></Field>
+          <Field label="Reach"><Input type="number" step="any" min="0" value={f.reach} onChange={set('reach')} /></Field>
+          <Field label="Impressions"><Input type="number" step="any" min="0" value={f.impressions} onChange={set('impressions')} /></Field>
+          <Field label="Clicks" hint={`CTR ${ctr}`}><Input type="number" step="any" min="0" value={f.clicks} onChange={set('clicks')} /></Field>
+          <Field label="Leads generated" hint={f.leads_generated > 0 ? `Cost per lead ${money(f.ad_spend / f.leads_generated)}` : ''}><Input type="number" step="any" min="0" value={f.leads_generated} onChange={set('leads_generated')} /></Field>
+          <Field label="Conversions / sales"><Input type="number" step="any" min="0" value={f.conversions} onChange={set('conversions')} /></Field>
           <div />
           <Field label="Results notes" span={3}><Textarea value={f.results_notes} onChange={set('results_notes')} placeholder="What worked, best creative, learnings…" /></Field>
         </fieldset>

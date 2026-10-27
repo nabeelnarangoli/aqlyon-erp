@@ -51,7 +51,7 @@ function Company() {
           </div>
         </Card>
         <Card title="Design workflow">
-          <Field label="Revisions included by default per task"><Input type="number" min="0" value={f.default_max_revisions} onChange={set('default_max_revisions')} /></Field>
+          <Field label="Revisions included by default per task"><Input type="number" step="any" min="0" value={f.default_max_revisions} onChange={set('default_max_revisions')} /></Field>
         </Card>
         <div className="row" style={{ justifyContent: 'flex-end' }}><Button type="submit" loading={busy}>Save settings</Button></div>
       </div>
@@ -93,7 +93,7 @@ function ServiceModal({ svc, onClose, onSaved }) {
         <Field label="Name" required><Input required value={f.name} onChange={set('name')} /></Field>
         <Field label="Category"><Select placeholder={false} options={CATS} value={f.category} onChange={set('category')} /></Field>
         <Field label="Unit"><Select placeholder={false} options={['per item', 'per month', 'per project', 'per hour', 'per day']} value={f.unit} onChange={set('unit')} /></Field>
-        <Field label="Rate (₹)"><Input type="number" min="0" value={f.rate} onChange={set('rate')} /></Field>
+        <Field label="Rate (₹)"><Input type="number" step="any" min="0" value={f.rate} onChange={set('rate')} /></Field>
         <Field label="Description"><Textarea rows={2} value={f.description} onChange={set('description')} /></Field>
         <label className="check"><input type="checkbox" checked={!!f.active} onChange={(e) => set('active')(e.target.checked)} />Show in quotation/invoice picker</label>
       </form>

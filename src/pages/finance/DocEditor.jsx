@@ -127,7 +127,7 @@ export default function DocEditor({ kind, doc = {}, onClose, onSaved }) {
             </tbody>
             <tfoot>
               <tr><td colSpan={3} className="right">Subtotal</td><td className="num">{money2(subtotal)}</td><td /></tr>
-              <tr><td colSpan={3} className="right">Discount (₹)</td><td className="num"><input className="input right" style={{ width: 120, marginLeft: 'auto' }} type="number" min="0" value={f.discount} onChange={set('discount')} /></td><td /></tr>
+              <tr><td colSpan={3} className="right">Discount (₹)</td><td className="num"><input className="input right" style={{ width: 120, marginLeft: 'auto' }} type="number" step="any" min="0" value={f.discount} onChange={set('discount')} /></td><td /></tr>
               <tr><td colSpan={3} className="right">Total</td><td className="num" style={{ fontSize: 16 }}>{money2(total)}</td><td /></tr>
             </tfoot>
           </table>

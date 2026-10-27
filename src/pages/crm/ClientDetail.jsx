@@ -261,17 +261,17 @@ function PackageModal({ pkg, clientId, onClose, onSaved }) {
       <form id="pkg" className="form f3" onSubmit={save}>
         <Field label="Package name" span={2} required><Input required value={f.name} onChange={set('name')} /></Field>
         <Field label="Status"><Select placeholder={false} options={['active', 'paused', 'ended'].map((x) => ({ id: x, label: x }))} value={f.status} onChange={set('status')} /></Field>
-        <Field label="Fee (₹)" required><Input type="number" min="0" required value={f.fee} onChange={set('fee')} /></Field>
+        <Field label="Fee (₹)" required><Input type="number" step="any" min="0" required value={f.fee} onChange={set('fee')} /></Field>
         <Field label="Billing"><Select placeholder={false} options={BILLING_TYPES} value={f.billing_type} onChange={set('billing_type')} /></Field>
-        <Field label="Invoice day of month"><Input type="number" min="1" max="28" value={f.billing_day} onChange={set('billing_day')} /></Field>
+        <Field label="Invoice day of month"><Input type="number" step="any" min="1" max="28" value={f.billing_day} onChange={set('billing_day')} /></Field>
         <Field label="Start date"><Input type="date" value={f.start_date} onChange={set('start_date')} /></Field>
         <Field label="End date" hint="Empty = ongoing"><Input type="date" value={f.end_date} onChange={set('end_date')} /></Field>
         <Field label="Renewal date"><Input type="date" value={f.renewal_date} onChange={set('renewal_date')} /></Field>
-        <Field label="Posts / month"><Input type="number" min="0" value={f.posts_per_month} onChange={set('posts_per_month')} /></Field>
-        <Field label="Carousels / month"><Input type="number" min="0" value={f.carousels_per_month} onChange={set('carousels_per_month')} /></Field>
-        <Field label="Reels / month"><Input type="number" min="0" value={f.reels_per_month} onChange={set('reels_per_month')} /></Field>
-        <Field label="Stories / month"><Input type="number" min="0" value={f.stories_per_month} onChange={set('stories_per_month')} /></Field>
-        <Field label="Ad budget / month (₹)" hint="Client's ad spend"><Input type="number" min="0" value={f.ad_budget} onChange={set('ad_budget')} /></Field>
+        <Field label="Posts / month"><Input type="number" step="any" min="0" value={f.posts_per_month} onChange={set('posts_per_month')} /></Field>
+        <Field label="Carousels / month"><Input type="number" step="any" min="0" value={f.carousels_per_month} onChange={set('carousels_per_month')} /></Field>
+        <Field label="Reels / month"><Input type="number" step="any" min="0" value={f.reels_per_month} onChange={set('reels_per_month')} /></Field>
+        <Field label="Stories / month"><Input type="number" step="any" min="0" value={f.stories_per_month} onChange={set('stories_per_month')} /></Field>
+        <Field label="Ad budget / month (₹)" hint="Client's ad spend"><Input type="number" step="any" min="0" value={f.ad_budget} onChange={set('ad_budget')} /></Field>
         <div />
         <Field label="Platforms" span={3}><Chips options={PLATFORMS} value={f.platforms || []} onChange={set('platforms')} /></Field>
         <Field label="Scope / inclusions" span={3}><Textarea value={f.scope_notes} onChange={set('scope_notes')} placeholder="Community management, monthly report, 1 shoot per month…" /></Field>

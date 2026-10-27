@@ -203,7 +203,7 @@ export function LeadModal({ lead, onClose, onSaved }) {
           <Field label="Industry"><Select options={INDUSTRIES} value={f.industry} onChange={set('industry')} /></Field>
           <Field label="Lead source"><Select options={LEAD_SOURCES} value={f.source} onChange={set('source')} /></Field>
           <Field label="Interested in" span={2}><Chips options={SERVICE_TAGS} value={f.services_interest || []} onChange={set('services_interest')} /></Field>
-          <Field label="Estimated monthly / deal value (₹)"><Input type="number" min="0" value={f.estimated_value} onChange={set('estimated_value')} /></Field>
+          <Field label="Estimated monthly / deal value (₹)"><Input type="number" step="any" min="0" value={f.estimated_value} onChange={set('estimated_value')} /></Field>
           <Field label="Temperature"><Select placeholder={false} options={[{ id: 'hot', label: '🔥 Hot' }, { id: 'warm', label: '☀️ Warm' }, { id: 'cold', label: '❄️ Cold' }]} value={f.temperature} onChange={set('temperature')} /></Field>
           <Field label="Stage"><Select placeholder={false} options={LEAD_STAGES} value={f.stage} onChange={set('stage')} /></Field>
           <Field label="Owner"><MemberSelect perm={['leads.manage', 'clients.manage']} value={f.owner_id} onChange={set('owner_id')} /></Field>

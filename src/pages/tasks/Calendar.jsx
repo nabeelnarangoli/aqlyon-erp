@@ -218,7 +218,7 @@ function PostModal({ post, readOnly, onClose, onSaved }) {
         <Card className="mt" title="Performance">
           <div className="form f3">
             <Field label="Post URL" span={3}><Input value={f.published_url} onChange={set('published_url')} disabled={readOnly} /></Field>
-            {['reach', 'likes', 'comments', 'shares', 'saves'].map((k) => <Field key={k} label={k[0].toUpperCase() + k.slice(1)}><Input type="number" min="0" value={f[k]} onChange={set(k)} disabled={readOnly} /></Field>)}
+            {['reach', 'likes', 'comments', 'shares', 'saves'].map((k) => <Field key={k} label={k[0].toUpperCase() + k.slice(1)}><Input type="number" step="any" min="0" value={f[k]} onChange={set(k)} disabled={readOnly} /></Field>)}
             <Field label="Engagement rate"><div className="input" style={{ display: 'flex', alignItems: 'center', background: 'var(--surface-2)' }}>{f.reach ? (((+f.likes + +f.comments + +f.shares + +f.saves) / f.reach) * 100).toFixed(2) + '%' : '—'}</div></Field>
           </div>
         </Card>
