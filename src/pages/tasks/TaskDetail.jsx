@@ -5,6 +5,7 @@ import {
   HelpCircle, ThumbsUp, ThumbsDown, Ban, Copy, Plus
 } from 'lucide-react'
 import { supabase, q, uploadFile, signedUrl } from '../../lib/supabase'
+import { optimizeImage, fmtBytes } from '../../lib/imageOptimize'
 import { useData, useRealtime } from '../../lib/hooks'
 import { useAuth } from '../../lib/auth'
 import { TASK_STATUSES, PRIORITIES, QUERY_CATEGORIES } from '../../lib/constants'
@@ -177,7 +178,9 @@ function FinalLink({ t, canEdit, onSaved }) {
 function ProofsSection({ t, proofs, canUpload, canReview, onReview, onChanged }) {
   const { user, isAdmin, member } = useAuth()
   const { confirm } = useToast()
-  const [file, setFile] = useState(null)
+  const [file, setFileRaw] = useState(null)
+  const [opt, setOpt] = useState(null)        // optimised copy of an image
+  const [original, setOriginal] = useState(false)
   const [link, setLink] = useState('')
   const [note, setNote] = useState('')
   const [over, setOver] = useState(false)
@@ -185,12 +188,20 @@ function ProofsSection({ t, proofs, canUpload, canReview, onReview, onChanged })
   const [busy, run] = useAction()
   const input = useRef()
 
+  const pick = useRef(0)
+  const setFile = async (f) => {
+    const n = ++pick.current
+    setFileRaw(f || null); setOpt(f && f.type.startsWith('image/') ? 'working' : null)
+    if (f && f.type.startsWith('image/')) { const r = await optimizeImage(f, 'design'); if (n === pick.current) setOpt(r) }
+  }
   const upload = () => run(async () => {
     if (!file && !link) throw new Error('Choose a file or paste a link')
-    if (file && file.size > 50 * 1024 * 1024) throw new Error('File is over 50 MB — share a Drive link instead')
-    const path = file ? await uploadFile('proofs', file, t.id) : null
-    await q(supabase.from('task_proofs').insert({ task_id: t.id, file_path: path, file_name: file?.name || null, file_type: file?.type || null, external_link: link || null, note: note || null }))
-    setFile(null); setLink(''); setNote(''); onChanged()
+    if (opt === 'working') throw new Error('Still optimising the image — one moment')
+    const send = file && !original && opt?.changed ? opt.file : file
+    if (send && send.size > 50 * 1024 * 1024) throw new Error('File is over 50 MB — share a Drive link instead')
+    const path = send ? await uploadFile('proofs', send, t.id) : null
+    await q(supabase.from('task_proofs').insert({ task_id: t.id, file_path: path, file_name: file?.name || null, file_type: send?.type || null, external_link: link || null, note: note || null }))
+    setFileRaw(null); setOpt(null); setOriginal(false); setLink(''); setNote(''); onChanged()
   }, 'Proof uploaded — sent for internal review')
   const remove = async (p) => {
     if (!(await confirm(`Delete proof v${p.version}?`, { danger: true, okText: 'Delete' }))) return
@@ -207,8 +218,16 @@ function ProofsSection({ t, proofs, canUpload, canReview, onReview, onChanged })
             <UploadCloud size={22} />
             <div className="strong" style={{ marginTop: 4 }}>{file ? file.name : 'Drop design file here or click to choose'}</div>
             <div className="tiny">JPG, PNG, PDF, MP4 · up to 50 MB · or paste a Drive/Canva link below</div>
-            <input ref={input} type="file" hidden accept="image/*,video/*,application/pdf" onChange={(e) => setFile(e.target.files[0])} />
+            <input ref={input} type="file" hidden accept="image/*,video/*,application/pdf" onChange={(e) => { setFile(e.target.files[0]); e.target.value = '' }} />
           </div>
+          {file && opt && (
+            <div className="row between wrap gap-s small mt" style={{ padding: '8px 12px', background: 'var(--green-50)', borderRadius: 10 }}>
+              <span>{opt === 'working' ? 'Optimising image…'
+                : opt.changed ? (original ? <>Uploading the original · {fmtBytes(opt.before)}</> : <>Optimised for storage: <b>{fmtBytes(opt.before)} → {fmtBytes(opt.after)}</b> ({Math.round(100 - (opt.after / opt.before) * 100)}% smaller) · full {opt.width}×{opt.height} px, same visible quality</>)
+                  : <>Image is already compact · {fmtBytes(opt.before)}</>}</span>
+              {opt !== 'working' && opt.changed && <label className="check tiny"><input type="checkbox" checked={original} onChange={(e) => setOriginal(e.target.checked)} />Keep original file (print-ready)</label>}
+            </div>
+          )}
           <div className="form mt">
             <Field label="Or link (Drive / Canva / Figma)"><Input value={link} onChange={(e) => setLink(e.target.value)} placeholder="https://" /></Field>
             <Field label="Note for reviewer"><Input value={note} onChange={(e) => setNote(e.target.value)} placeholder="What changed in this version?" /></Field>

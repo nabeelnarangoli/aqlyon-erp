@@ -4,6 +4,7 @@ import { SupplierModal } from './Suppliers'
 import { Plus, Download, Receipt, Paperclip, Trash2, Repeat, HandCoins, Undo2 } from 'lucide-react'
 import { useAuth } from '../../lib/auth'
 import { supabase, q, uploadFile, signedUrl } from '../../lib/supabase'
+import { optimizeImage } from '../../lib/imageOptimize'
 import { useData } from '../../lib/hooks'
 import { EXPENSE_CATEGORIES, PAYMENT_METHODS } from '../../lib/constants'
 import { money, money2, date, monthStart, monthEnd, todayISO, downloadCSV } from '../../lib/format'
@@ -142,7 +143,7 @@ function ExpenseModal({ exp, onClose, onSaved }) {
     if (!f.supplier_id) throw new Error('Choose who you paid (or add a new payee with +)')
     const p = { spent_on: f.spent_on, category: f.category, supplier_id: f.supplier_id, description: f.description || null, amount: Number(f.amount), method: f.method, client_id: f.client_id || null, rebillable: !!f.rebillable, recurring: !!f.recurring, paid_by: f.paid_by || null }
     if (!(p.amount > 0)) throw new Error('Enter amount')
-    if (file) p.receipt_path = await uploadFile('receipts', file, f.spent_on.slice(0, 7))
+    if (file) p.receipt_path = await uploadFile('receipts', (await optimizeImage(file, 'receipt')).file, f.spent_on.slice(0, 7))
     isNew ? await q(supabase.from('expenses').insert(p)) : await q(supabase.from('expenses').update(p).eq('id', exp.id))
     onSaved()
   }, 'Expense saved') }
