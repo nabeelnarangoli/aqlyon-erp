@@ -128,6 +128,44 @@ export function Field({ label, hint, children, span, required }) {
   )
 }
 export function Input(p) { return <input className="input" {...(p.type === 'number' && !p.step ? { step: 'any' } : {})} {...p} value={p.value ?? ''} /> }
+// textarea that suggests team members after "@" and inserts @FullName (no spaces), which the database turns into a notification
+export function MentionTextarea({ value, onChange, onKeyDown, ...p }) {
+  const { team, user } = useAuth()
+  const [pick, setPick] = useState(null)   // { start, term }
+  const [i, setI] = useState(0)
+  const opts = pick ? team.filter((m) => m.active && m.id !== user?.id && m.full_name.toLowerCase().replace(/\s/g, '').includes(pick.term.toLowerCase())).slice(0, 6) : []
+  const look = (el) => {
+    const upto = el.value.slice(0, el.selectionStart)
+    const m = upto.match(/(^|\s)@([A-Za-z0-9_.]*)$/)
+    setPick(m ? { start: upto.length - m[2].length - 1, term: m[2], end: el.selectionStart } : null); setI(0)
+  }
+  const choose = (m) => {
+    const tag = '@' + m.full_name.replace(/\s+/g, '') + ' '
+    const v = String(value || '')
+    onChange({ target: { value: v.slice(0, pick.start) + tag + v.slice(pick.end) } })
+    setPick(null)
+  }
+  return (
+    <div className="mention-wrap">
+      {pick && opts.length > 0 && (
+        <div className="mention-list">{opts.map((m, k) => (
+          <button type="button" key={m.id} className={k === i ? 'on' : ''} onMouseDown={(e) => { e.preventDefault(); choose(m) }}><Avatar name={m.full_name} size={20} />{m.full_name}</button>
+        ))}</div>
+      )}
+      <textarea className="input" rows={3} {...p} value={value ?? ''}
+        onChange={(e) => { onChange(e); look(e.target) }} onClick={(e) => look(e.target)} onBlur={() => setTimeout(() => setPick(null), 150)}
+        onKeyDown={(e) => {
+          if (pick && opts.length) {
+            if (e.key === 'ArrowDown') { e.preventDefault(); setI((i + 1) % opts.length); return }
+            if (e.key === 'ArrowUp') { e.preventDefault(); setI((i - 1 + opts.length) % opts.length); return }
+            if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); choose(opts[i]); return }
+            if (e.key === 'Escape') { setPick(null); return }
+          }
+          onKeyDown?.(e)
+        }} />
+    </div>
+  )
+}
 export function Textarea(p) { return <textarea className="input" rows={3} {...p} value={p.value ?? ''} /> }
 export function Select({ options, placeholder, value, onChange, ...p }) {
   return (

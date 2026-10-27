@@ -233,4 +233,18 @@ update content_posts set results = '[{"platform":"Instagram","url":"https://inst
  where id = (select id from content_posts limit 1);
 select 'post results totals' t, published_url, reach, likes, comments from content_posts where jsonb_array_length(results) = 2;
 reset role;
+-- ===== approvals & mentions
+delete from notifications;
+select pg_temp.as_user('00000000-0000-0000-0000-00000000000b');
+insert into content_posts(client_id, publish_date, title, status) select id, current_date, 'Approval test post', 'internal_review' from clients where customer_type='regular' limit 1;
+reset role;
+select 'post approval notified (admin gets one)' t, count(*) from notifications n join profiles p on p.id=n.user_id where n.kind='approval' and p.email='admin@aq.test';
+select pg_temp.as_user('00000000-0000-0000-0000-00000000000c');
+insert into task_comments(task_id, author_id, body) select id, auth.uid(), 'Hey @nabeel please check — and @NoSuchPerson' from design_tasks limit 1;
+reset role;
+select 'mention' t, p.email, n.kind, n.title from notifications n join profiles p on p.id = n.user_id where n.kind = 'mention';
+select pg_temp.as_user('00000000-0000-0000-0000-00000000000a');
+update content_posts set status = 'client_approval' where title = 'Approval test post';
+reset role;
+select 'approval cleared after decision (0 unread)' t, count(*) from notifications where kind='approval' and not read and ref_id = (select id from content_posts where title='Approval test post');
 select 'ALL TESTS PASSED' as result;

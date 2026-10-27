@@ -11,7 +11,7 @@ import { useAuth } from '../../lib/auth'
 import { TASK_STATUSES, PRIORITIES, QUERY_CATEGORIES } from '../../lib/constants'
 import { date, dateTime, dueLabel, ago, hours, todayISO } from '../../lib/format'
 import {
-  Button, Badge, StatusBadge, Member, Avatar, Card, Modal, Field, Input, Textarea, Select, Loading, ErrorBox, Empty, IconBtn,
+  Button, Badge, StatusBadge, Member, Avatar, Card, Modal, Field, Input, Textarea, MentionTextarea, Select, Loading, ErrorBox, Empty, IconBtn,
   MemberSelect, useAction, useForm, useToast, cx
 } from '../../components/ui'
 import { TaskModal } from './TaskForm'
@@ -333,7 +333,7 @@ function Discussion({ taskId }) {
         <div ref={end} />
       </div>
       <div className="composer">
-        <Textarea rows={2} value={text} onChange={(e) => setText(e.target.value)} placeholder="Write a message… (Ctrl+Enter to send)"
+        <MentionTextarea rows={2} value={text} onChange={(e) => setText(e.target.value)} placeholder="Write a message… type @ to mention someone (Ctrl+Enter to send)"
           onKeyDown={(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) send() }} />
         <Button icon={Send} loading={busy} onClick={send} disabled={!text.trim()} />
       </div>
@@ -417,7 +417,7 @@ export function AskQuery({ task, client, onClose, onSaved }) {
         <Field label="…or to a whole team"><Select disabled={!!f.to_user} options={roles.map((r) => ({ id: r.id, label: `Everyone in ${r.name}` }))} value={f.to_role_id} onChange={set('to_role_id')} /></Field>
         <Field label="Category"><Select placeholder={false} options={QUERY_CATEGORIES} value={f.category} onChange={set('category')} /></Field>
         <Field label="Priority"><Select placeholder={false} options={PRIORITIES} value={f.priority} onChange={set('priority')} /></Field>
-        <Field label="Details" span={2} required><Textarea rows={5} required value={f.body} onChange={set('body')} /></Field>
+        <Field label="Details" span={2} required hint="Type @ to mention someone"><MentionTextarea rows={5} required value={f.body} onChange={set('body')} /></Field>
       </form>
     </Modal>
   )

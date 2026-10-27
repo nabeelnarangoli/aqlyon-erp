@@ -8,6 +8,7 @@ import { REPORT_PERMS } from './lib/permissions'
 import Login from './pages/Login'
 import SetupNeeded from './pages/SetupNeeded'
 
+const Approvals = lazy(() => import('./pages/Approvals'))
 const Dashboard = lazy(() => import('./pages/Dashboard'))
 const Leads = lazy(() => import('./pages/crm/Leads'))
 const Clients = lazy(() => import('./pages/crm/Clients'))
@@ -75,6 +76,7 @@ function Gate() {
       <Routes>
         <Route element={<Layout />}>
           <Route index element={<Dashboard />} />
+          <Route path="approvals" element={<Approvals />} />
           <Route path="leads" element={<Guard perm={['leads.view', 'leads.manage']}><Leads /></Guard>} />
           <Route path="clients" element={<Guard perm={['clients.view', 'clients.manage']}><Clients /></Guard>} />
           <Route path="clients/:id" element={<Guard perm={['clients.view', 'clients.manage']}><ClientDetail /></Guard>} />

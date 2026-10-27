@@ -794,8 +794,6 @@ begin
     if new.status = 'revision' then
       new.revision_count := old.revision_count + 1;
       perform public.notify(new.assignee_id, 'Revision requested', new.code || ' · ' || new.title, '/tasks/' || new.id);
-    elsif new.status = 'internal_review' then
-      perform public.notify(new.created_by, 'Design ready for review (proof uploaded)', new.code || ' · ' || new.title, '/tasks/' || new.id);
     elsif new.status = 'approved' then
       new.approved_at := coalesce(new.approved_at, now());
       perform public.notify(new.assignee_id, 'Design approved 🎉', new.code || ' · ' || new.title, '/tasks/' || new.id);
@@ -1316,6 +1314,127 @@ create table if not exists public.social_kpis (
   unique (client_id, platform, month, week_no)
 );
 create index if not exists idx_kpi_client_month on public.social_kpis(client_id, month);
+
+-- ---------------------------------------------------------------------
+-- 10f. APPROVAL & MENTION NOTIFICATIONS
+--   kind: 'approval' (something waits for you to approve), 'mention' (@you),
+--   'info'. Approval requests go to everyone who can approve, not only the creator.
+-- ---------------------------------------------------------------------
+alter table public.notifications add column if not exists kind text not null default 'info';
+alter table public.notifications add column if not exists actor_id uuid references public.profiles(id) on delete set null;
+alter table public.notifications add column if not exists ref_id uuid;   -- the task / post an approval request is about
+create index if not exists idx_notif_ref on public.notifications(ref_id) where ref_id is not null;
+create index if not exists idx_notif_user_unread on public.notifications(user_id, read, created_at desc);
+
+drop function if exists public.notify_kind(uuid, text, text, text, text);
+create or replace function public.notify_kind(uid uuid, t text, b text, l text, k text, ref uuid default null) returns void
+language sql security definer set search_path = public as $$
+  insert into public.notifications(user_id, title, body, link, kind, actor_id, ref_id)
+  select uid, t, b, l, coalesce(k, 'info'), auth.uid(), ref where uid is not null and uid is distinct from auth.uid();
+$$;
+-- once someone has decided, the approval request disappears for everyone
+create or replace function public.clear_approval(ref uuid) returns void
+language sql security definer set search_path = public as $$
+  update public.notifications set read = true where ref_id = ref and kind = 'approval' and not read;
+$$;
+
+-- everyone active whose role has one of these permissions (Administrator included)
+create or replace function public.users_with_perm(variadic want text[]) returns setof uuid
+language sql stable security definer set search_path = public as $$
+  select p.id from public.profiles p join public.roles r on r.id = p.role_id
+  where p.active and (r.permissions && array['*'] or r.permissions && want);
+$$;
+
+-- proof uploaded → creator + every reviewer
+create or replace function public.notify_proof_review() returns trigger
+language plpgsql security definer set search_path = public as $$
+declare who uuid;
+begin
+  if new.status = 'internal_review' and old.status is distinct from 'internal_review' then
+    for who in select new.created_by union select public.users_with_perm('tasks.review') loop
+      perform public.notify_kind(who, 'Approval needed: design proof', new.code || ' · ' || new.title, '/approvals', 'approval', new.id);
+    end loop;
+  elsif old.status = 'internal_review' and new.status is distinct from 'internal_review' then
+    perform public.clear_approval(new.id);
+  end if;
+  return null;
+end $$;
+drop trigger if exists trg_notify_proof_review on public.design_tasks;
+create trigger trg_notify_proof_review after update of status on public.design_tasks
+  for each row execute function public.notify_proof_review();
+
+-- post sent for internal approval → everyone who manages the calendar
+create or replace function public.notify_post_review() returns trigger
+language plpgsql security definer set search_path = public as $$
+declare who uuid; cname text;
+begin
+  if new.status = 'internal_review' and (tg_op = 'INSERT' or old.status is distinct from 'internal_review') then
+    select name into cname from public.clients where id = new.client_id;
+    for who in select public.users_with_perm('calendar.manage') loop
+      perform public.notify_kind(who, 'Approval needed: post', coalesce(cname, '') || ' · ' || new.title || ' · ' || to_char(new.publish_date, 'DD Mon'), '/approvals', 'approval', new.id);
+    end loop;
+  elsif tg_op = 'UPDATE' and old.status = 'internal_review' then
+    perform public.clear_approval(new.id);
+    if new.status in ('copywriting', 'in_design', 'idea') then
+      perform public.notify_kind(coalesce(new.assignee_id, new.created_by), 'Changes requested on a post', new.title, '/calendar', 'info');
+    end if;
+  end if;
+  return null;
+end $$;
+drop trigger if exists trg_notify_post_review on public.content_posts;
+create trigger trg_notify_post_review after insert or update of status on public.content_posts
+  for each row execute function public.notify_post_review();
+
+-- @mentions: "@Arjun" (first name) or "@ArjunDas" (full name without spaces), case-insensitive
+create or replace function public.notify_mentions(p_body text, p_where text, p_link text) returns void
+language plpgsql security definer set search_path = public as $$
+declare tok text; who uuid; me text;
+begin
+  if p_body is null or position('@' in p_body) = 0 then return; end if;
+  select full_name into me from public.profiles where id = auth.uid();
+  for tok in select distinct lower(m[1]) from regexp_matches(p_body, '@([A-Za-z][A-Za-z0-9_.]{1,40})', 'g') m loop
+    for who in
+      select id from public.profiles where active and (
+        lower(regexp_replace(full_name, '[^A-Za-z0-9]', '', 'g')) = regexp_replace(tok, '[^a-z0-9]', '', 'g')
+        or (lower(split_part(full_name, ' ', 1)) = tok
+            and (select count(*) from public.profiles x where x.active and lower(split_part(x.full_name, ' ', 1)) = tok) = 1))
+    loop
+      perform public.notify_kind(who, coalesce(me, 'Someone') || ' mentioned you · ' || p_where, left(p_body, 160), p_link, 'mention');
+    end loop;
+  end loop;
+end $$;
+
+create or replace function public.comment_mentions() returns trigger
+language plpgsql security definer set search_path = public as $$
+declare t public.design_tasks;
+begin
+  if new.kind <> 'comment' then return null; end if;
+  select * into t from public.design_tasks where id = new.task_id;
+  perform public.notify_mentions(new.body, t.code, '/tasks/' || t.id);
+  return null;
+end $$;
+drop trigger if exists trg_comment_mentions on public.task_comments;
+create trigger trg_comment_mentions after insert on public.task_comments for each row execute function public.comment_mentions();
+
+create or replace function public.reply_mentions() returns trigger
+language plpgsql security definer set search_path = public as $$
+declare q public.queries;
+begin
+  select * into q from public.queries where id = new.query_id;
+  perform public.notify_mentions(new.body, 'query: ' || q.subject, '/queries/' || q.id);
+  return null;
+end $$;
+drop trigger if exists trg_reply_mentions on public.query_replies;
+create trigger trg_reply_mentions after insert on public.query_replies for each row execute function public.reply_mentions();
+
+create or replace function public.query_mentions() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  perform public.notify_mentions(new.body, 'query: ' || new.subject, '/queries/' || new.id);
+  return null;
+end $$;
+drop trigger if exists trg_query_mentions on public.queries;
+create trigger trg_query_mentions after insert on public.queries for each row execute function public.query_mentions();
 
 -- every money movement in one place (in = client payments, out = supplier payments + expenses)
 create or replace view public.v_money_movements with (security_invoker = true) as

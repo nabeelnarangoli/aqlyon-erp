@@ -421,3 +421,29 @@ select.input { padding-right: 28px; appearance: none; background-image: url("dat
 .result-nums .input { padding: 7px 9px; display: flex; align-items: center; }
 @media (max-width: 720px) { .result-nums { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 .plat-link { display: inline-flex; align-items: center; gap: 3px; font-size: 12px; margin-right: 8px; white-space: nowrap; }
+
+/* approvals */
+.nav .count.hot { background: var(--amber, #f59e0b); color: #fff; }
+.approval-section { margin-bottom: 26px; }
+.approval-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 14px; }
+.approval-card { overflow: hidden; border-left: 3px solid var(--amber, #f59e0b); }
+.approval-thumb { height: 190px; background: var(--surface-2) center/contain no-repeat; display: grid; place-items: center; color: var(--text-3); cursor: pointer; position: relative; border-bottom: 1px solid var(--line); }
+.approval-thumb .ver { position: absolute; top: 8px; left: 8px; background: rgba(0,0,0,.65); color: #fff; font-size: 11px; font-weight: 700; padding: 2px 7px; border-radius: 99px; }
+
+/* pop-up notifications */
+.notif-pops { position: fixed; right: 18px; bottom: 18px; z-index: 900; display: flex; flex-direction: column; gap: 10px; width: min(380px, calc(100vw - 36px)); }
+.notif-pop { display: flex; gap: 10px; align-items: flex-start; background: var(--surface); border: 1px solid var(--line); border-left: 4px solid var(--text-3); border-radius: 14px; padding: 12px 10px 12px 12px; box-shadow: 0 12px 32px rgba(0,0,0,.16); animation: popIn .25s ease-out; }
+.notif-pop.kind-approval { border-left-color: var(--amber, #f59e0b); }
+.notif-pop.kind-mention { border-left-color: var(--blue, #2563eb); }
+.notif-more { align-self: flex-end; font-size: 12.5px; background: var(--surface); border: 1px solid var(--line); border-radius: 99px; padding: 6px 12px; box-shadow: var(--shadow); }
+.link-btn { background: none; border: 0; padding: 0; color: var(--green-d); font-weight: 600; cursor: pointer; font-size: inherit; }
+@keyframes popIn { from { transform: translateY(12px); opacity: 0 } to { transform: none; opacity: 1 } }
+
+/* @mention picker */
+.mention-wrap { position: relative; flex: 1; }
+.mention-list { position: absolute; bottom: 100%; left: 0; margin-bottom: 6px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow); min-width: 220px; z-index: 50; overflow: hidden; }
+.mention-list button { display: flex; gap: 8px; align-items: center; width: 100%; background: none; border: 0; padding: 8px 10px; cursor: pointer; text-align: left; font-size: 13px; }
+.mention-list button.on, .mention-list button:hover { background: var(--green-50); }
+.approvals-banner { display: flex; align-items: center; gap: 12px; padding: 14px 16px; margin-bottom: 18px; border-radius: 14px; cursor: pointer;
+  background: linear-gradient(90deg, #fff6e5, #fffbf2); border: 1px solid #f6d58f; color: #7a4b00; }
+.approvals-banner:hover { border-color: var(--amber, #f59e0b); }

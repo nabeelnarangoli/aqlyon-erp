@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import {
   LayoutDashboard, Target, Building2, PhoneCall, Megaphone, Palette, CalendarDays, MessagesSquare,
-  FileText, FileSignature, Wallet, Receipt, BarChart3, Users, Settings, LogOut, Bell, Menu, Clock, CheckCheck, Truck, Store, ShoppingBag, TrendingUp
+  FileText, FileSignature, Wallet, Receipt, BarChart3, Users, Settings, LogOut, Bell, Menu, Clock, CheckCheck, Truck, Store, ShoppingBag, TrendingUp, BadgeCheck, AtSign, X
 } from 'lucide-react'
 import { useAuth } from '../lib/auth'
 import { supabase, q, DEMO } from '../lib/supabase'
@@ -15,6 +16,7 @@ import { Avatar, IconBtn, SearchInput, Badge, cx } from './ui'
 const NAV = [
   { group: null, items: [
     { to: '/', label: 'Dashboard', icon: LayoutDashboard, perm: [], end: true },
+    { to: '/approvals', label: 'Approvals', icon: BadgeCheck, perm: [], badge: 'approvals', hot: true },
     { to: '/walkin', label: 'Walk-in sale', icon: ShoppingBag, perm: [] }
   ] },
   { group: 'CRM', items: [
@@ -55,16 +57,19 @@ export default function Layout() {
 
   const counts = useData(async () => {
     const uid = user.id
-    const [tasks, queries, fups] = await Promise.all([
+    const [tasks, queries, fups, apProofs, apPosts, apRev] = await Promise.all([
       has('tasks.work') && !has('tasks.manage', 'tasks.review')
         ? supabase.from('design_tasks').select('id', { count: 'exact', head: true }).eq('assignee_id', uid).in('status', ['todo', 'in_progress', 'revision'])
         : supabase.from('design_tasks').select('id', { count: 'exact', head: true }).in('status', ['internal_review']),
       supabase.from('queries').select('id', { count: 'exact', head: true }).neq('status', 'resolved').neq('from_user', uid),
       has('leads.manage', 'clients.manage')
         ? supabase.from('interactions').select('id', { count: 'exact', head: true }).eq('done', false).not('next_action_date', 'is', null).lte('next_action_date', new Date().toISOString().slice(0, 10))
-        : Promise.resolve({ count: 0 })
+        : Promise.resolve({ count: 0 }),
+      has('tasks.review') ? supabase.from('design_tasks').select('id', { count: 'exact', head: true }).eq('status', 'internal_review') : Promise.resolve({ count: 0 }),
+      has('calendar.manage') ? supabase.from('content_posts').select('id', { count: 'exact', head: true }).eq('status', 'internal_review') : Promise.resolve({ count: 0 }),
+      has('tasks.work') ? supabase.from('design_tasks').select('id', { count: 'exact', head: true }).eq('status', 'revision').eq('assignee_id', uid) : Promise.resolve({ count: 0 })
     ])
-    return { tasks: tasks.count || 0, queries: queries.count || 0, followups: fups.count || 0 }
+    return { tasks: tasks.count || 0, queries: queries.count || 0, followups: fups.count || 0, approvals: (apProofs.count || 0) + (apPosts.count || 0) + (apRev.count || 0) }
   }, [loc.pathname], {})
 
   return (
@@ -84,7 +89,7 @@ export default function Layout() {
                 {items.map((i) => (
                   <NavLink key={i.to} to={i.to} end={i.end}>
                     <i.icon size={17} />{i.label}
-                    {i.badge && counts.data?.[i.badge] > 0 && <span className="count">{counts.data[i.badge]}</span>}
+                    {i.badge && counts.data?.[i.badge] > 0 && <span className={cx('count', i.hot && 'hot')}>{counts.data[i.badge]}</span>}
                   </NavLink>
                 ))}
               </div>
@@ -163,8 +168,11 @@ function Notifications() {
   const nav = useNavigate()
   const [open, setOpen] = useState(false)
   const ref = useRef()
-  const list = useData(() => q(supabase.from('notifications').select('*').order('created_at', { ascending: false }).limit(40)), [], [])
+  const loc = useLocation()
+  const list = useData(() => q(supabase.from('notifications').select('*').order('created_at', { ascending: false }).limit(40)), [loc.pathname], [])
   useRealtime('notifications', `user_id=eq.${user.id}`, () => list.reload())
+  useEffect(() => { const t = setInterval(() => list.reload(), 60000); return () => clearInterval(t) }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  const markRead = async (x) => { await supabase.from('notifications').update({ read: true }).eq('id', x.id); list.reload() }
   useEffect(() => {
     const h = (e) => ref.current && !ref.current.contains(e.target) && setOpen(false)
     document.addEventListener('mousedown', h); return () => document.removeEventListener('mousedown', h)
@@ -176,8 +184,10 @@ function Notifications() {
     if (x.link) nav(x.link)
   }
   const markAll = async () => { await supabase.from('notifications').update({ read: true }).eq('read', false); list.reload() }
+  const popups = (list.data || []).filter((x) => !x.read)
   return (
     <div ref={ref} style={{ position: 'relative' }}>
+      <NotificationPopups items={popups} onOpen={openItem} onRead={markRead} onReadAll={markAll} />
       <IconBtn icon={Bell} title="Notifications" size={18} onClick={() => setOpen((v) => !v)} />
       {unread > 0 && <span className="pip" style={{ position: 'absolute', top: 2, right: 2, pointerEvents: 'none', background: 'var(--red)', color: '#fff', borderRadius: 99, fontSize: 10, fontWeight: 700, minWidth: 16, height: 16, display: 'grid', placeItems: 'center', padding: '0 4px' }}>{unread}</span>}
       {open && (
@@ -186,6 +196,7 @@ function Notifications() {
           {(list.data || []).length === 0 && <div className="empty small">You're all caught up.</div>}
           {(list.data || []).map((x) => (
             <div key={x.id} className={cx('notif', !x.read && 'unread')} onClick={() => openItem(x)}>
+              <KindIcon kind={x.kind} />
               <div className="grow">
                 <div className="strong">{x.title}</div>
                 {x.body && <div className="small muted">{x.body}</div>}
@@ -197,6 +208,43 @@ function Notifications() {
       )}
     </div>
   )
+}
+
+const KIND = { approval: { icon: BadgeCheck, tone: 'amber', label: 'Approval' }, mention: { icon: AtSign, tone: 'blue', label: 'Mention' } }
+function KindIcon({ kind }) {
+  const k = KIND[kind] || { icon: Bell, tone: 'slate' }
+  return <span className={`stat-icon tone-${k.tone}`} style={{ width: 28, height: 28, borderRadius: 8 }}><k.icon size={14} /></span>
+}
+
+// pop-up cards for unread notifications; each stays until marked read (or opened)
+function NotificationPopups({ items, onOpen, onRead, onReadAll }) {
+  if (!items.length) return null
+  const show = [...items].sort((a, b) => (a.kind === 'approval' ? -1 : 0) - (b.kind === 'approval' ? -1 : 0)).slice(0, 3)
+  return createPortal(
+    <div className="notif-pops no-print">
+      {show.map((x) => {
+        const k = KIND[x.kind]
+        return (
+          <div key={x.id} className={cx('notif-pop', x.kind && `kind-${x.kind}`)}>
+            <KindIcon kind={x.kind} />
+            <div className="grow" style={{ minWidth: 0 }}>
+              {k && <div className="tiny" style={{ fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text-3)' }}>{k.label}</div>}
+              <div className="strong">{x.title}</div>
+              {x.body && <div className="small muted" style={{ overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>{x.body}</div>}
+              <div className="row gap-xs" style={{ marginTop: 8 }}>
+                {x.link && <button className="btn btn-sm btn-primary" onClick={() => onOpen(x)}>{x.kind === 'approval' ? 'Review' : 'Open'}</button>}
+                <button className="btn btn-sm btn-ghost" onClick={() => onRead(x)}>Mark read</button>
+                <span className="tiny faint" style={{ marginLeft: 'auto' }}>{ago(x.created_at)}</span>
+              </div>
+            </div>
+            <button className="icon-btn" title="Mark read" onClick={() => onRead(x)}><X size={14} /></button>
+          </div>
+        )
+      })}
+      {items.length > show.length && (
+        <div className="notif-more">+{items.length - show.length} more unread · <button className="link-btn" onClick={onReadAll}>Mark all read</button></div>
+      )}
+    </div>, document.body)
 }
 
 function DemoBar() {

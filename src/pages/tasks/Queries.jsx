@@ -6,7 +6,7 @@ import { useData, useRealtime } from '../../lib/hooks'
 import { useAuth } from '../../lib/auth'
 import { QUERY_STATUS, PRIORITIES } from '../../lib/constants'
 import { ago, dateTime } from '../../lib/format'
-import { PageHeader, Button, Badge, StatusBadge, Member, Avatar, Card, Textarea, Loading, Empty, SearchInput, useAction, cx } from '../../components/ui'
+import { PageHeader, Button, Badge, StatusBadge, Member, Avatar, Card, Textarea, MentionTextarea, Loading, Empty, SearchInput, useAction, cx } from '../../components/ui'
 import { AskQuery } from './TaskDetail'
 
 export default function Queries() {
@@ -115,7 +115,7 @@ function Thread({ id, onChanged }) {
       {x.status !== 'resolved' && (
         <>
           <div className="composer">
-            <Textarea rows={2} value={text} onChange={(e) => setText(e.target.value)} placeholder="Reply… (Ctrl+Enter to send)" onKeyDown={(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && text.trim()) send(false) }} />
+            <MentionTextarea rows={2} value={text} onChange={(e) => setText(e.target.value)} placeholder="Reply… type @ to mention someone (Ctrl+Enter to send)" onKeyDown={(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && text.trim()) send(false) }} />
             <Button icon={Send} loading={busy} disabled={!text.trim()} onClick={() => send(false)} />
           </div>
           <div className="row mt" style={{ justifyContent: 'flex-end' }}><Button size="sm" variant="soft" icon={CheckCircle2} onClick={() => send(true)}>{text.trim() ? 'Reply & resolve' : 'Mark resolved'}</Button></div>

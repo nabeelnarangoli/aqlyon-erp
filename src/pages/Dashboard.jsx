@@ -2,7 +2,7 @@ import { useNavigate, Link } from 'react-router-dom'
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, Legend } from 'recharts'
 import {
   Target, Building2, Palette, AlertTriangle, Wallet, TrendingUp, Receipt, PhoneCall, CalendarDays, MessagesSquare, Clock, Plus,
-  CheckCircle2, RotateCcw, FileText, Eye
+  CheckCircle2, RotateCcw, FileText, Eye, BadgeCheck
 } from 'lucide-react'
 import { supabase, q } from '../lib/supabase'
 import { useData } from '../lib/hooks'
@@ -32,6 +32,7 @@ export default function Dashboard() {
           {has('invoices.manage') && <Button variant="outline" icon={FileText} onClick={() => nav('/finance/invoices?new=1')}>Invoice</Button>}
         </div>
       </div>
+      <ApprovalsBanner />
       {isAdmin ? <AdminDash /> : <>
         {has('leads.manage', 'tasks.manage', 'tasks.review') && <MarketerDash />}
         {has('tasks.work') && !has('tasks.manage') && <DesignerDash />}
@@ -346,3 +347,27 @@ function FinanceDash() {
   )
 }
 
+
+// big, separate call-out whenever something waits for this person's approval
+function ApprovalsBanner() {
+  const { has, user } = useAuth()
+  const nav = useNavigate()
+  const { data } = useData(async () => {
+    const c = (r) => r.count || 0
+    const [pr, po, rv] = await Promise.all([
+      has('tasks.review') ? supabase.from('design_tasks').select('id', { count: 'exact', head: true }).eq('status', 'internal_review') : { count: 0 },
+      has('calendar.manage') ? supabase.from('content_posts').select('id', { count: 'exact', head: true }).eq('status', 'internal_review') : { count: 0 },
+      has('tasks.work') ? supabase.from('design_tasks').select('id', { count: 'exact', head: true }).eq('status', 'revision').eq('assignee_id', user.id) : { count: 0 }
+    ])
+    return { proofs: c(pr), posts: c(po), revisions: c(rv) }
+  }, [], null)
+  if (!data || !(data.proofs + data.posts + data.revisions)) return null
+  const parts = [data.proofs && `${data.proofs} design proof${data.proofs > 1 ? 's' : ''} to approve`, data.posts && `${data.posts} post${data.posts > 1 ? 's' : ''} to approve`, data.revisions && `${data.revisions} revision${data.revisions > 1 ? 's' : ''} requested from you`].filter(Boolean)
+  return (
+    <div className="approvals-banner" onClick={() => nav('/approvals')}>
+      <BadgeCheck size={22} />
+      <div className="grow"><b>Waiting for you:</b> {parts.join(' · ')}</div>
+      <Button size="sm">Review now</Button>
+    </div>
+  )
+}

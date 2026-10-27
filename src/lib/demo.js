@@ -3,7 +3,7 @@ import { DEFAULT_ROLES } from './permissions'
 // database triggers/RPCs from supabase/schema.sql, on sample data kept in localStorage.
 // Only used when the app is built with VITE_DEMO=1.
 
-const KEY = 'aqlyon-erp-demo-v8'
+const KEY = 'aqlyon-erp-demo-v10'
 const SKEY = 'aqlyon-erp-demo-session'
 const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : 'id-' + Math.random().toString(36).slice(2) + Date.now().toString(36))
 const nowISO = () => new Date().toISOString()
@@ -74,7 +74,7 @@ const DEFAULTS = {
   payments: () => ({ paid_on: iso(new Date()), method: 'UPI', created_by: uid(), collected_by: uid() }),
   expenses: () => ({ spent_on: iso(new Date()), category: 'Office Supplies', method: 'UPI', rebillable: false, recurring: false, created_by: uid() }),
   reimbursements: () => ({ paid_on: iso(new Date()), method: 'Bank Transfer', created_by: uid() }),
-  notifications: () => ({ read: false }),
+  notifications: () => ({ read: false, kind: 'info' }),
   activity_log: () => ({ actor_id: uid() }),
   services: () => ({ category: 'Design', unit: 'per item', rate: 0, active: true }),
   profiles: () => ({ weekly_hours: 54, work_days: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'], work_start: '09:30', work_end: '18:30', active: true }),
@@ -87,9 +87,30 @@ const DEFAULTS = {
 }
 
 /* ---------------------------- triggers ---------------------------- */
-function notify(user, title, body, link) {
+function notify(user, title, body, link, kind = 'info', ref = null) {
   if (!user || user === uid()) return
-  T('notifications').push({ id: uuid(), user_id: user, title, body, link, read: false, created_at: nowISO() })
+  T('notifications').push({ id: uuid(), user_id: user, title, body, link, kind, actor_id: uid(), ref_id: ref, read: false, created_at: nowISO() })
+}
+const clearApproval = (ref) => T('notifications').forEach((n) => { if (n.ref_id === ref && n.kind === 'approval') n.read = true })
+const usersWithPerm = (...want) => T('profiles').filter((p) => { const r = T('roles').find((x) => x.id === p.role_id); return p.active && r && (r.permissions.includes('*') || want.some((w) => r.permissions.includes(w))) }).map((p) => p.id)
+// mirrors notify_mentions(): @FirstName or @FullNameWithoutSpaces
+function mentions(body, where, link) {
+  if (!body || !body.includes('@')) return
+  const me = T('profiles').find((p) => p.id === uid())?.full_name || 'Someone'
+  const toks = [...new Set([...body.matchAll(/@([A-Za-z][A-Za-z0-9_.]{1,40})/g)].map((m) => m[1].toLowerCase()))]
+  const people = T('profiles').filter((p) => p.active)
+  for (const tok of toks) {
+    const t = tok.replace(/[^a-z0-9]/g, '')
+    const firsts = people.filter((p) => p.full_name.split(' ')[0].toLowerCase() === tok)
+    people.filter((p) => p.full_name.toLowerCase().replace(/[^a-z0-9]/g, '') === t || (firsts.length === 1 && firsts[0].id === p.id))
+      .forEach((p) => notify(p.id, `${me} mentioned you · ${where}`, body.slice(0, 160), link, 'mention'))
+  }
+}
+function postReview(r, old) {
+  if (r.status === 'internal_review' && (!old || old.status !== 'internal_review')) {
+    const c = T('clients').find((x) => x.id === r.client_id)
+    usersWithPerm('calendar.manage').forEach((u) => notify(u, 'Approval needed: post', `${c?.name || ''} · ${r.title} · ${r.publish_date}`, '/approvals', 'approval', r.id))
+  } else if (old && old.status === 'internal_review') { clearApproval(r.id); if (['copywriting', 'in_design', 'idea'].includes(r.status)) notify(r.assignee_id || r.created_by, 'Changes requested on a post', r.title, '/calendar') }
 }
 function totals(r) {
   const s = (r.items || []).reduce((a, i) => a + Number(i.qty ?? 1) * Number(i.rate || 0), 0)
@@ -172,6 +193,10 @@ function beforeInsert(table, r) {
   }
 }
 function afterInsert(table, r) {
+  if (table === 'content_posts') postReview(r, null)
+  if (table === 'task_comments' && r.kind === 'comment') { const t = T('design_tasks').find((x) => x.id === r.task_id); if (t) mentions(r.body, t.code, `/tasks/${t.id}`) }
+  if (table === 'query_replies') { const qq = T('queries').find((x) => x.id === r.query_id); if (qq) mentions(r.body, `query: ${qq.subject}`, `/queries/${qq.id}`) }
+  if (table === 'queries') mentions(r.body, `query: ${r.subject}`, `/queries/${r.id}`)
   if (table === 'design_tasks') notify(r.assignee_id, 'New design task assigned', `${r.code} · ${r.title}`, `/tasks/${r.id}`)
   if (table === 'task_proofs') {
     const t = T('design_tasks').find((x) => x.id === r.task_id)
@@ -198,7 +223,8 @@ function afterTaskUpdate(old, t) {
   if (t.assignee_id !== old.assignee_id && t.assignee_id) notify(t.assignee_id, 'New design task assigned', `${t.code} · ${t.title}`, `/tasks/${t.id}`)
   if (t.status !== old.status) {
     if (t.status === 'revision') { t.revision_count = (old.revision_count || 0) + 1; notify(t.assignee_id, 'Revision requested', `${t.code} · ${t.title}`, `/tasks/${t.id}`) }
-    else if (t.status === 'internal_review') notify(t.created_by, 'Design ready for review (proof uploaded)', `${t.code} · ${t.title}`, `/tasks/${t.id}`)
+    else if (t.status === 'internal_review') [...new Set([t.created_by, ...usersWithPerm('tasks.review')])].forEach((u) => notify(u, 'Approval needed: design proof', `${t.code} · ${t.title}`, '/approvals', 'approval', t.id))
+    if (old.status === 'internal_review' && t.status !== 'internal_review') clearApproval(t.id)
     else if (t.status === 'approved') { t.approved_at ||= nowISO(); notify(t.assignee_id, 'Design approved 🎉', `${t.code} · ${t.title}`, `/tasks/${t.id}`) }
     else if (t.status === 'delivered') t.delivered_at ||= nowISO()
     else if (t.status === 'in_progress' && !t.start_date) t.start_date = iso(new Date())
@@ -209,6 +235,7 @@ function afterUpdate(table, old, r) {
   if (['leads', 'clients', 'design_tasks', 'queries', 'content_posts'].includes(table)) r.updated_at = nowISO()
   if (table === 'invoices' || table === 'quotations') totals(r)
   if (table === 'content_posts' && old.results !== r.results) postResults(r)
+  if (table === 'content_posts' && old.status !== r.status) postReview(r, old)
   if (table === 'staff_pay') payCalc(r)
   if (table === 'expenses' && (r.supplier_id !== old.supplier_id || r.vendor !== old.vendor)) expensePayee(r)
   if (table === 'roles' && old.key === 'admin') { r.permissions = ['*']; r.key = 'admin' }

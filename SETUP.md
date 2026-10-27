@@ -135,6 +135,13 @@ Open a client for the monthly report (Print / PDF to send them):
 
 Weeks follow the sheet: Week 1 = 1st–7th, Week 2 = 8th–14th, Week 3 = 15th–21st, Week 4 = 22nd–28th, Week 5 = 29th–end.
 
+## Approvals, mentions and pop-up notifications
+
+- **Approvals** (top of the menu, with a count) lists everything waiting for *you*: design proofs to approve (with the proof preview — Approve / Request changes right there), posts to approve (Approve → client, Approve final, Send back), revisions requested from you, queries for you, and what's waiting on clients. The dashboard shows a yellow "Waiting for you" bar when anything is pending.
+- Approval requests go to **everyone who can approve** (proofs: anyone with *Approve proofs*; posts: anyone with *Manage calendar*), not only the task creator. When one person decides, the request disappears for the others.
+- **@mentions**: in task chat, query replies and new queries, type `@` and pick a name. That person gets a mention notification.
+- **Pop-ups**: unread notifications appear as cards at the bottom-right (approvals first) and stay until you press **Mark read** or open them.
+
 ## Updating the database later
 
 When a new version of `supabase/schema.sql` ships, run it again in the SQL Editor — it only adds or replaces what changed and keeps your data.
