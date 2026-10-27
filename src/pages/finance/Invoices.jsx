@@ -103,7 +103,7 @@ export function PaymentModal({ invoice, payment, onClose, onSaved }) {
   const isNew = !payment?.id
   const { user } = useAuth()
   const balance = invoice ? Number(invoice.total) - Number(invoice.amount_paid) : 0
-  const [f, set] = useForm({ invoice_id: invoice?.id || '', client_id: invoice?.client_id || '', paid_on: todayISO(), amount: balance > 0 ? balance : '', method: 'UPI', reference: '', note: '', collected_by: user?.id || '', ...payment })
+  const [f, set] = useForm({ invoice_id: invoice?.id || '', client_id: invoice?.client_id || '', paid_on: todayISO(), amount: balance > 0 ? balance : '', method: 'UPI', reference: '', note: '', collected_by: '', ...payment })
   const invs = useData(() => (invoice ? [] : q(supabase.from('v_invoice_status').select('id,number,client_id,client_name,balance').in('status', ['sent', 'partial', 'draft']).order('issue_date'))), [], [])
   const [busy, run] = useAction()
   const save = (e) => { e.preventDefault(); run(async () => {
@@ -123,7 +123,7 @@ export function PaymentModal({ invoice, payment, onClose, onSaved }) {
         <Field label="Amount (₹)" required><Input type="number" min="0" step="any" required value={f.amount} onChange={set('amount')} /></Field>
         <Field label="Received on"><Input type="date" value={f.paid_on} onChange={set('paid_on')} /></Field>
         <Field label="Method"><Select placeholder={false} options={PAYMENT_METHODS} value={f.method} onChange={set('method')} /></Field>
-        <Field label="Money received by" hint="Who has the cash / whose account it came into"><MemberSelect value={f.collected_by} onChange={set('collected_by')} placeholder="—" /></Field>
+        <Field label="Money received by" hint="Company account, or the team member holding the cash / whose account it came into"><MemberSelect value={f.collected_by} onChange={set('collected_by')} placeholder="Company account" /></Field>
         <Field label="Reference" hint="UPI ref / cheque no. / transaction ID"><Input value={f.reference} onChange={set('reference')} /></Field>
         <Field label="Note"><Textarea rows={2} value={f.note} onChange={set('note')} /></Field>
       </form>

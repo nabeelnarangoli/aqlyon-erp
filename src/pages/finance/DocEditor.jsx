@@ -67,7 +67,6 @@ export default function DocEditor({ kind, doc = {}, onClose, onSaved }) {
     items: [...s.items.filter((i) => i.description || Number(i.rate)), { description: pkgLine(p), qty: 1, rate: Number(p.fee), package_id: p.id }],
     ...(kind === 'invoice' && !s.package_id && !billedFor(p) ? { package_id: p.id, period_month: p.billing_type === 'one_time' ? null : month } : {})
   }))
-  const grouped = services.data.reduce((a, s) => { (a[s.category] ||= []).push(s); return a }, {})
   return (
     <Modal open size="xl" onClose={onClose} title={`${isNew ? 'New' : 'Edit'} ${kind === 'invoice' ? 'invoice' : 'quotation'}${doc.number ? ' · ' + doc.number : ''}`}
       footer={<><span className="muted" style={{ marginRight: 'auto' }}>Total <b style={{ color: 'var(--ink)', fontSize: 18 }}>{money2(total)}</b></span>
@@ -108,10 +107,9 @@ export default function DocEditor({ kind, doc = {}, onClose, onSaved }) {
 
         <div className="row between mt-l mb"><h3>Line items</h3>
           <div className="row gap-s">
-            <select className="input input-sm" style={{ width: 280 }} value="" onChange={(e) => { const s = services.data.find((x) => x.id === e.target.value); if (s) addItem(s) }}>
-              <option value="">+ Add from service catalogue…</option>
-              {Object.entries(grouped).map(([g, list]) => <optgroup key={g} label={g}>{list.map((s) => <option key={s.id} value={s.id}>{s.name}{Number(s.rate) ? ` — ₹${Number(s.rate).toLocaleString('en-IN')}` : ' — enter rate'}</option>)}</optgroup>)}
-            </select>
+            <div style={{ width: 300 }}><Select className="input-sm" value="" placeholder="+ Add from service catalogue…" searchable
+              options={services.data.map((x) => ({ id: x.id, group: x.category, label: `${x.name}${Number(x.rate) ? ` — ₹${Number(x.rate).toLocaleString('en-IN')}` : ' — enter rate'}` }))}
+              onChange={(id) => { const x = services.data.find((y) => y.id === id); if (x) addItem(x) }} /></div>
             <Button type="button" size="sm" variant="outline" icon={Plus} onClick={() => addItem()}>Blank line</Button>
           </div>
         </div>

@@ -20,7 +20,7 @@ export default function Payments() {
   const [by, setBy] = useState('')
   const [adding, setAdding] = useState(false)
   const [bill, setBill] = useState(null)
-  const { member } = useAuth()
+  const { member, team } = useAuth()
   const nav = useNavigate()
   const { data, loading, reload } = useData(async () => {
     const [inc, out, exp, reimb] = await Promise.all([
@@ -34,7 +34,7 @@ export default function Payments() {
   }, [from, to], { inc: [], out: [], exp: [], reimb: [] })
 
   const custOf = (p) => (p.supplier_bills?.supplier_bill_allocations || []).map((a) => a.clients?.name).filter(Boolean).join(', ')
-  const inc = useMemo(() => data.inc.filter((p) => (!method || p.method === method) && (!client || p.client_id === client) && (!by || p.collected_by === by)), [data.inc, method, client, by])
+  const inc = useMemo(() => data.inc.filter((p) => (!method || p.method === method) && (!client || p.client_id === client) && (!by || (by === '__company' ? !p.collected_by : p.collected_by === by))), [data.inc, method, client, by])
   const out = useMemo(() => data.out.filter((p) => (!method || p.method === method) && (!client || (p.supplier_bills?.supplier_bill_allocations || []).some((a) => a.client_id === client))), [data.out, method, client])
   const exp = useMemo(() => data.exp.filter((e) => (!method || e.method === method) && (!client || e.client_id === client)), [data.exp, method, client])
   const tIn = inc.reduce((a, p) => a + Number(p.amount), 0)
@@ -73,7 +73,7 @@ export default function Payments() {
         <DateRange from={from} to={to} onChange={(a, b) => { setFrom(a); setTo(b) }} />
         <ClientSelect value={client} onChange={(v) => setClient(v || '')} placeholder="All customers" includeInactive />
         <Select options={PAYMENT_METHODS} value={method} onChange={(v) => setMethod(v || '')} placeholder="All methods" />
-        {tab === 'in' && <MemberSelect value={by} onChange={(v) => setBy(v || '')} placeholder="Received by anyone" />}
+        {tab === 'in' && <Select options={[{ id: '__company', label: 'Company account' }, ...team.filter((m) => m.active).map((m) => ({ id: m.id, label: m.full_name }))]} value={by} onChange={(v) => setBy(v || '')} placeholder="Received by anyone" />}
       </div>
       <div className="stats">
         <Stat label="Money in" value={money(tIn)} sub={`${inc.length} customer payments`} icon={ArrowDownLeft} onClick={() => setTab('in')} />
@@ -109,7 +109,7 @@ export default function Payments() {
               <tr key={p.id}>
                 <td className="nowrap">{date(p.paid_on)}</td><td className="cell-title">{p.client_id ? <Link to={`/clients/${p.client_id}`}>{p.clients?.name}</Link> : '—'}</td>
                 <td>{p.invoice_id ? <Link to={`/finance/invoices/${p.invoice_id}`}>{p.invoices?.number}</Link> : <Badge tone="amber">On account</Badge>}</td>
-                <td>{p.method}</td><td className="small">{member(p.collected_by)?.full_name || '—'}</td><td className="small muted">{p.reference || p.note || '—'}</td><td className="num strong">{money2(p.amount)}</td>
+                <td>{p.method}</td><td className="small">{member(p.collected_by)?.full_name || <span className="faint">Company account</span>}</td><td className="small muted">{p.reference || p.note || '—'}</td><td className="num strong">{money2(p.amount)}</td>
               </tr>))}</tbody>
             <tfoot><tr><td colSpan={6}>Total</td><td className="num">{money2(tIn)}</td></tr></tfoot>
           </table></div>

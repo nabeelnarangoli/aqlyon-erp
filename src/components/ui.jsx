@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useState } from 'react'
+import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useNavigate } from 'react-router-dom'
 import { X, Loader2, AlertTriangle, CheckCircle2, Info, Search, Inbox, Plus, Printer, Download } from 'lucide-react'
@@ -168,14 +168,66 @@ export function MentionTextarea({ value, onChange, onKeyDown, ...p }) {
   )
 }
 export function Textarea(p) { return <textarea className="input" rows={3} {...p} value={p.value ?? ''} /> }
-export function Select({ options, placeholder, value, onChange, ...p }) {
+// Dropdown with a search box (shown when there are more than 6 choices). Same props as before:
+// options = ['a', 'b'] or [{ id, label, group? }], placeholder (false = no empty choice), value, onChange(id | null)
+export function Select({ options, placeholder, value, onChange, style, className, disabled, searchable, title }) {
+  const opts = (options || []).map((o) => (typeof o === 'string' ? { id: o, label: o } : o))
+  const empty = placeholder !== false ? { id: '', label: placeholder || 'Select…', empty: true } : null
+  const cur = opts.find((o) => String(o.id) === String(value ?? ''))
+  const [open, setOpen] = useState(false)
+  const [term, setTerm] = useState('')
+  const [hi, setHi] = useState(0)
+  const [pos, setPos] = useState(null)
+  const btn = useRef(), pop = useRef(), listRef = useRef()
+  const withSearch = searchable ?? opts.length > 6
+  const t = term.trim().toLowerCase()
+  const shown = t ? opts.filter((o) => `${o.label} ${o.group || ''}`.toLowerCase().includes(t)) : [...(empty ? [empty] : []), ...opts]
+  const place = () => {
+    const r = btn.current?.getBoundingClientRect(); if (!r) return
+    const below = window.innerHeight - r.bottom, h = Math.min(340, 46 + shown.length * 34)
+    const up = below < h + 12 && r.top > below
+    setPos({ left: Math.min(r.left, window.innerWidth - Math.max(r.width, 240) - 8), width: Math.max(r.width, 240), ...(up ? { bottom: window.innerHeight - r.top + 4 } : { top: r.bottom + 4 }) })
+  }
+  const show = () => { if (disabled) return; setTerm(''); setHi(Math.max(0, [...(empty ? [empty] : []), ...opts].findIndex((o) => String(o.id) === String(value ?? '')))); place(); setOpen(true) }
+  const choose = (o) => { setOpen(false); onChange(o.empty ? null : o.id); btn.current?.focus() }
+  useEffect(() => {
+    if (!open) return
+    const out = (e) => { if (!btn.current?.contains(e.target) && !pop.current?.contains(e.target)) setOpen(false) }
+    const re = (e) => { if (!pop.current?.contains(e.target)) place() }
+    document.addEventListener('mousedown', out); window.addEventListener('scroll', re, true); window.addEventListener('resize', re)
+    return () => { document.removeEventListener('mousedown', out); window.removeEventListener('scroll', re, true); window.removeEventListener('resize', re) }
+  }, [open]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { listRef.current?.querySelector('.on')?.scrollIntoView({ block: 'nearest' }) }, [hi, open])
+  const key = (e) => {
+    if (!open) { if (['ArrowDown', 'Enter', ' '].includes(e.key)) { e.preventDefault(); show() } return }
+    if (e.key === 'ArrowDown') { e.preventDefault(); setHi((h) => Math.min(h + 1, shown.length - 1)) }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); setHi((h) => Math.max(h - 1, 0)) }
+    else if (e.key === 'Enter') { e.preventDefault(); if (shown[hi]) choose(shown[hi]) }
+    else if (e.key === 'Escape' || e.key === 'Tab') setOpen(false)
+  }
+  let lastGroup = null
   return (
-    <select className="input" value={value ?? ''} onChange={(e) => onChange(e.target.value || null)} {...p}>
-      {placeholder !== false && <option value="">{placeholder || 'Select…'}</option>}
-      {options.map((o) => typeof o === 'string'
-        ? <option key={o} value={o}>{o}</option>
-        : <option key={o.id} value={o.id}>{o.label}</option>)}
-    </select>
+    <>
+      <button type="button" ref={btn} className={cx('input select-btn', className, !cur && 'is-empty')} style={style} disabled={disabled} title={title || cur?.label}
+        onClick={() => (open ? setOpen(false) : show())} onKeyDown={key}>
+        <span className="ellipsis">{cur ? cur.label : (empty ? empty.label : 'Select…')}</span>
+      </button>
+      {open && pos && createPortal(
+        <div ref={pop} className="select-pop" style={{ position: 'fixed', ...pos }} onKeyDown={key}>
+          {withSearch && <div className="select-search"><Search size={14} /><input autoFocus value={term} placeholder="Type to search…" onChange={(e) => { setTerm(e.target.value); setHi(0) }} /></div>}
+          <div className="select-list" ref={listRef}>
+            {shown.length === 0 && <div className="select-none">No match for “{term}”</div>}
+            {shown.map((o, i) => {
+              const head = o.group && o.group !== lastGroup ? <div key={'g' + o.group} className="select-group">{o.group}</div> : null
+              lastGroup = o.group || lastGroup
+              return [head, (
+                <button type="button" key={'o' + o.id} className={cx(i === hi && 'on', String(o.id) === String(value ?? '') && !o.empty && 'sel', o.empty && 'empty')}
+                  onMouseEnter={() => setHi(i)} onMouseDown={(e) => { e.preventDefault(); choose(o) }}>{o.label}</button>
+              )]
+            })}
+          </div>
+        </div>, document.body)}
+    </>
   )
 }
 export function Chips({ options, value = [], onChange }) {
