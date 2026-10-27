@@ -247,4 +247,8 @@ select pg_temp.as_user('00000000-0000-0000-0000-00000000000a');
 update content_posts set status = 'client_approval' where title = 'Approval test post';
 reset role;
 select 'approval cleared after decision (0 unread)' t, count(*) from notifications where kind='approval' and not read and ref_id = (select id from content_posts where title='Approval test post');
+select pg_temp.as_user('00000000-0000-0000-0000-00000000000c');
+select 'walk-in details filled' t, walkin_customer('Fresh Visitor', '9000000001', null, 'fresh@x.in', 'Vadakara', 'Near bus stand') is not null;
+reset role;
+select 'details' t, phone, whatsapp, email, city, address from clients where phone = '9000000001';
 select 'ALL TESTS PASSED' as result;

@@ -1226,7 +1226,9 @@ begin
 end $$;
 
 -- add (or find by mobile) a walk-in customer from any client picker (any team member)
-create or replace function public.walkin_customer(p_name text, p_phone text default null)
+drop function if exists public.walkin_customer(text, text);
+create or replace function public.walkin_customer(p_name text, p_phone text default null, p_whatsapp text default null,
+  p_email text default null, p_city text default null, p_address text default null)
 returns uuid language plpgsql security definer set search_path = public as $$
 declare cid uuid;
 begin
@@ -1236,13 +1238,20 @@ begin
     select id into cid from public.clients where customer_type = 'walkin' and public.phone_key(phone) = public.phone_key(p_phone) limit 1;
   end if;
   if cid is null then
-    insert into public.clients(name, contact_person, phone, whatsapp, customer_type, status, account_manager_id)
-    values (trim(p_name), trim(p_name), nullif(trim(p_phone), ''), nullif(trim(p_phone), ''), 'walkin', 'active', auth.uid())
+    insert into public.clients(name, contact_person, phone, whatsapp, email, city, address, customer_type, status, account_manager_id)
+    values (trim(p_name), trim(p_name), nullif(trim(p_phone), ''), coalesce(nullif(trim(p_whatsapp), ''), nullif(trim(p_phone), '')),
+            nullif(trim(p_email), ''), nullif(trim(p_city), ''), nullif(trim(p_address), ''), 'walkin', 'active', auth.uid())
     returning id into cid;
+  else
+    -- returning customer: fill in details we didn't have before, never overwrite
+    update public.clients set
+      whatsapp = coalesce(whatsapp, nullif(trim(p_whatsapp), '')), email = coalesce(email, nullif(trim(p_email), '')),
+      city = coalesce(city, nullif(trim(p_city), '')), address = coalesce(address, nullif(trim(p_address), ''))
+    where id = cid;
   end if;
   return cid;
 end $$;
-grant execute on function public.walkin_customer(text, text) to authenticated;
+grant execute on function public.walkin_customer(text, text, text, text, text, text) to authenticated;
 
 -- collect the balance of a walk-in invoice later (any team member)
 create or replace function public.walkin_collect(p_invoice uuid, p_amount numeric, p_method text default 'Cash', p_reference text default null)

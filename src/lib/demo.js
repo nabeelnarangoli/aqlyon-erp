@@ -461,10 +461,11 @@ function rpc(name, a) {
       if (!String(a.p_name || '').trim()) throw new Error('Enter the customer name')
       const key = (x) => String(x || '').replace(/\D/g, '').slice(-10)
       const hit = key(a.p_phone).length >= 10 && T('clients').find((c) => c.customer_type === 'walkin' && key(c.phone) === key(a.p_phone))
-      if (hit) return { data: hit.id, error: null }
+      const more = { whatsapp: a.p_whatsapp || a.p_phone || null, email: a.p_email || null, city: a.p_city || null, address: a.p_address || null }
+      if (hit) { for (const k of ['whatsapp', 'email', 'city', 'address']) if (!hit[k] && more[k]) hit[k] = more[k]; persist(); return { data: hit.id, error: null } }
       const prev = currentUser; currentUser = null
       try {
-        const { data: c } = new Query('clients').insert({ name: a.p_name.trim(), contact_person: a.p_name.trim(), phone: a.p_phone || null, whatsapp: a.p_phone || null, customer_type: 'walkin', status: 'active', account_manager_id: me, created_by: me }).exec()
+        const { data: c } = new Query('clients').insert({ name: a.p_name.trim(), contact_person: a.p_name.trim(), phone: a.p_phone || null, ...more, customer_type: 'walkin', status: 'active', account_manager_id: me, created_by: me }).exec()
         return { data: (Array.isArray(c) ? c[0] : c).id, error: null }
       } finally { currentUser = prev }
     }

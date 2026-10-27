@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
-import { ArrowLeft, Printer, Save, CalendarDays, TrendingUp, TrendingDown, Minus, ExternalLink, Check, BarChart3 } from 'lucide-react'
+import { ArrowLeft, Printer, Download, Save, CalendarDays, TrendingUp, TrendingDown, Minus, ExternalLink, Check, BarChart3 } from 'lucide-react'
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, Legend, LineChart, Line } from 'recharts'
-import { supabase, q, DEMO } from '../../lib/supabase'
+import { supabase, q } from '../../lib/supabase'
+import { downloadPdf } from '../../lib/pdf'
 import { useAuth } from '../../lib/auth'
 import { useData } from '../../lib/hooks'
 import { DELIVERY_KINDS, kindOf, DONE_POST, KPI_FIELDS, KPI_PLATFORMS, POST_STATUSES } from '../../lib/constants'
@@ -156,6 +157,7 @@ function ClientReport({ id, ym, setYm }) {
   }, [id, ym], null)
 
   const [platform, setPlatform] = useState('Instagram')
+  const [pdfBusy, setPdfBusy] = useState(false)
   const platforms = useMemo(() => {
     if (!data) return ['Instagram', 'Facebook']
     const fromPkg = data.pk.flatMap((p) => p.platforms || []).filter((p) => KPI_PLATFORMS.includes(p))
@@ -180,7 +182,8 @@ function ClientReport({ id, ym, setYm }) {
           <MonthPicker ym={ym} onChange={setYm} />
           <Link className="btn btn-outline" to={`/clients/${id}`}>Client page</Link>
           <Link className="btn btn-outline" to="/calendar"><CalendarDays size={15} />Content calendar</Link>
-          {!DEMO && <Button icon={Printer} onClick={() => window.print()}>Print / PDF report</Button>}
+          <Button variant="outline" icon={Printer} onClick={() => window.print()}>Print</Button>
+          <Button icon={Download} loading={pdfBusy} onClick={async () => { setPdfBusy(true); try { await downloadPdf(document.querySelector('.social-report'), `${c.name} social report ${ym}`) } finally { setPdfBusy(false) } }}>Download PDF</Button>
         </div>
       </div>
 

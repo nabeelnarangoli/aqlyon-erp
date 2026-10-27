@@ -7,7 +7,7 @@ import { useAuth } from '../../lib/auth'
 import { INVOICE_STATUS, PAYMENT_METHODS } from '../../lib/constants'
 import { money, money2, date, monthStart, monthEnd, todayISO, downloadCSV } from '../../lib/format'
 import {
-  PageHeader, Button, Badge, StatusBadge, Stat, Modal, Field, Input, Select, Textarea, ClientSelect, MemberSelect, SearchInput, Loading, Empty,
+  PageHeader, Button, Badge, StatusBadge, Stat, Modal, Field, Input, Select, Textarea, ClientSelect, MemberSelect, SearchInput, Loading, Empty, DocActions,
   useAction, useForm, useToast
 } from '../../components/ui'
 import DocEditor from './DocEditor'
@@ -74,7 +74,7 @@ export default function Invoices() {
       </div>
       {loading ? <Loading /> : rows.length === 0 ? <Empty icon={FileText} title="No invoices">Create one, or generate this month’s retainer invoices from client packages.</Empty> : (
         <div className="card table-wrap"><table className="table">
-          <thead><tr><th>Invoice</th><th>Client</th><th>Date</th><th>Due</th><th>Status</th><th className="num">Total</th><th className="num">Paid</th><th className="num">Balance</th>{isFin && <th />}</tr></thead>
+          <thead><tr><th>Invoice</th><th>Client</th><th>Date</th><th>Due</th><th>Status</th><th className="num">Total</th><th className="num">Paid</th><th className="num">Balance</th><th />{isFin && <th />}</tr></thead>
           <tbody>{rows.map((i) => (
             <tr key={i.id} className="click" onClick={() => nav(`/finance/invoices/${i.id}`)}>
               <td className="cell-title nowrap">{i.number}</td>
@@ -83,9 +83,10 @@ export default function Invoices() {
               <td className="nowrap">{i.overdue ? <Badge tone="red">{i.days_overdue}d overdue</Badge> : date(i.due_date)}</td>
               <td><StatusBadge list={INVOICE_STATUS} value={i.status} /></td>
               <td className="num">{money(i.total)}</td><td className="num">{money(i.amount_paid)}</td><td className="num strong">{money(i.balance)}</td>
+              <td><DocActions to={`/finance/invoices/${i.id}`} /></td>
               {isFin && <td onClick={(e) => e.stopPropagation()}>{['sent', 'partial', 'draft'].includes(i.status) && <Button size="sm" variant="soft" onClick={() => setPaying(i)}>Record payment</Button>}</td>}
             </tr>))}</tbody>
-          <tfoot><tr><td colSpan={5}>{rows.length} invoices</td><td className="num">{money(rows.reduce((a, i) => a + Number(i.total), 0))}</td><td className="num">{money(rows.reduce((a, i) => a + Number(i.amount_paid), 0))}</td><td className="num">{money(rows.reduce((a, i) => a + Number(i.balance), 0))}</td>{isFin && <td />}</tr></tfoot>
+          <tfoot><tr><td colSpan={5}>{rows.length} invoices</td><td className="num">{money(rows.reduce((a, i) => a + Number(i.total), 0))}</td><td className="num">{money(rows.reduce((a, i) => a + Number(i.amount_paid), 0))}</td><td className="num">{money(rows.reduce((a, i) => a + Number(i.balance), 0))}</td><td />{isFin && <td />}</tr></tfoot>
           </table></div>
       )}
       {editing && <DocEditor kind="invoice" doc={editing} onClose={() => setEditing(null)} onSaved={(row) => { setEditing(null); nav(`/finance/invoices/${row.id}`) }} />}

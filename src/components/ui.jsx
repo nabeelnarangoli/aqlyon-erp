@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { X, Loader2, AlertTriangle, CheckCircle2, Info, Search, Inbox, Plus } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
+import { X, Loader2, AlertTriangle, CheckCircle2, Info, Search, Inbox, Plus, Printer, Download } from 'lucide-react'
 import { initials } from '../lib/format'
 import { useAuth } from '../lib/auth'
 import { useData } from '../lib/hooks'
@@ -185,6 +186,18 @@ export function Chips({ options, value = [], onChange }) {
     </div>
   )
 }
+// print / download-PDF icons for a document row; opens the document and runs the action there
+export function DocActions({ to }) {
+  const nav = useNavigate()
+  const go = (e, what) => { e.stopPropagation(); nav(`${to}?${what}=1`) }
+  return (
+    <span className="row gap-xs nowrap" onClick={(e) => e.stopPropagation()}>
+      <IconBtn icon={Printer} size={15} title="Print" onClick={(e) => go(e, 'print')} />
+      <IconBtn icon={Download} size={15} title="Download PDF" onClick={(e) => go(e, 'download')} />
+    </span>
+  )
+}
+
 export function MemberSelect({ value, onChange, perm, placeholder = 'Unassigned' }) {
   const { team, memberHas } = useAuth()
   const opts = team.filter((m) => m.active && (!perm || memberHas(m, ...perm) || m.id === value)).map((m) => ({ id: m.id, label: m.full_name }))
@@ -221,26 +234,36 @@ export function ClientSelect({ value, onChange, placeholder = 'Select client…'
 export function NewCustomerModal({ onClose, onSaved }) {
   const { has } = useAuth()
   const canRegular = has('clients.manage', 'leads.manage')
-  const [f, set] = useForm({ type: 'walkin', name: '', phone: '', contact_person: '' })
+  const [f, set] = useForm({ type: 'walkin', name: '', phone: '', whatsapp: '', waSame: true, email: '', city: '', address: '', contact_person: '' })
+  const wa = f.waSame ? f.phone : f.whatsapp
   const [busy, run] = useAction()
   const save = (e) => { e.preventDefault(); e.stopPropagation(); run(async () => {   // stop: this form sits inside other forms (React events bubble through portals)
     if (!f.name.trim()) throw new Error('Enter the customer name')
+    if (f.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(f.email.trim())) throw new Error('Check the email address')
+    const more = { whatsapp: wa?.trim() || null, email: f.email.trim() || null, city: f.city.trim() || null, address: f.address.trim() || null }
     const id = f.type === 'walkin'
-      ? await q(supabase.rpc('walkin_customer', { p_name: f.name.trim(), p_phone: f.phone || null }))
-      : (await q(supabase.from('clients').insert({ name: f.name.trim(), contact_person: f.contact_person || f.name.trim(), phone: f.phone || null, whatsapp: f.phone || null, status: 'active', customer_type: 'regular' }).select('id').single())).id
+      ? await q(supabase.rpc('walkin_customer', { p_name: f.name.trim(), p_phone: f.phone || null, p_whatsapp: more.whatsapp, p_email: more.email, p_city: more.city, p_address: more.address }))
+      : (await q(supabase.from('clients').insert({ name: f.name.trim(), contact_person: f.contact_person || f.name.trim(), phone: f.phone || null, ...more, status: 'active', customer_type: 'regular' }).select('id').single())).id
     onSaved(id)
   }, 'Customer added') }
   return (
-    <Modal open size="sm" onClose={onClose} title="New customer"
+    <Modal open size="md" onClose={onClose} title="New customer"
       footer={<><Button variant="ghost" onClick={onClose}>Cancel</Button><Button form="newcust" type="submit" loading={busy}>Add customer</Button></>}>
-      <form id="newcust" className="form f1" onSubmit={save}>
+      <form id="newcust" className="form" onSubmit={save}>
         <Field label="Customer type">
           <Select placeholder={false} value={f.type} onChange={set('type')}
             options={[{ id: 'walkin', label: 'Walk-in customer' }, ...(canRegular ? [{ id: 'regular', label: 'Regular client (business account)' }] : [])]} />
         </Field>
         <Field label={f.type === 'walkin' ? 'Name' : 'Business / brand name'} required><Input value={f.name} onChange={set('name')} autoFocus /></Field>
         {f.type === 'regular' && <Field label="Contact person"><Input value={f.contact_person} onChange={set('contact_person')} /></Field>}
-        <Field label="Mobile number" hint={f.type === 'walkin' ? 'If this number is already saved, that customer is used instead of a duplicate' : undefined}><Input type="tel" value={f.phone} onChange={set('phone')} /></Field>
+        <Field label="Mobile number" hint={f.type === 'walkin' ? 'If this number is already saved, that customer is used (and missing details filled in)' : undefined}><Input type="tel" inputMode="tel" value={f.phone} onChange={set('phone')} placeholder="98470 12345" /></Field>
+        <Field label="WhatsApp">
+          {f.waSame ? <label className="check" style={{ minHeight: 38 }}><input type="checkbox" checked onChange={() => { set('whatsapp')(f.phone); set('waSame')(false) }} />Same as mobile number</label>
+            : <Input type="tel" inputMode="tel" value={f.whatsapp} onChange={set('whatsapp')} placeholder="WhatsApp number" />}
+        </Field>
+        <Field label="Email"><Input type="email" value={f.email} onChange={set('email')} placeholder="name@example.com" /></Field>
+        <Field label="Location / area"><Input value={f.city} onChange={set('city')} placeholder="e.g. Koyilandy, Vadakara" /></Field>
+        <Field label="Address" span={2}><Textarea rows={2} value={f.address} onChange={set('address')} placeholder="Building, street, PIN — printed on the invoice" /></Field>
       </form>
     </Modal>
   )

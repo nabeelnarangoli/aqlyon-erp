@@ -1,7 +1,8 @@
-import { useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
-import { ArrowLeft, Printer, Pencil, Send, Wallet, MessageCircle, Ban, Copy, FileCheck2, Trash2, CheckCircle2, XCircle } from 'lucide-react'
-import { supabase, q, DEMO } from '../../lib/supabase'
+import { useEffect, useRef, useState } from 'react'
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import { downloadPdf } from '../../lib/pdf'
+import { ArrowLeft, Printer, Pencil, Send, Wallet, MessageCircle, Ban, Copy, FileCheck2, Trash2, CheckCircle2, XCircle, Download } from 'lucide-react'
+import { supabase, q } from '../../lib/supabase'
 import { useData } from '../../lib/hooks'
 import { useAuth } from '../../lib/auth'
 import { INVOICE_STATUS, QUOTE_STATUS } from '../../lib/constants'
@@ -24,6 +25,19 @@ export default function InvoiceView({ kind }) {
   const table = kind === 'invoice' ? 'invoices' : 'quotations'
   const doc = useData(() => q(supabase.from(table).select('*, clients(*)').eq('id', id).single()), [id, table])
   const pays = useData(() => (kind === 'invoice' ? q(supabase.from('payments').select('*').eq('invoice_id', id).order('paid_on')) : []), [id], [])
+  const docRef = useRef()
+  const [sp, setSp] = useSearchParams()
+  const [pdfBusy, setPdfBusy] = useState(false)
+  const { toast } = useToast()
+  const pdf = async (name) => { setPdfBusy(true); try { await downloadPdf(docRef.current, name) } catch (e) { toast(e.message || 'Could not create the PDF', 'error') } finally { setPdfBusy(false) } }
+  const ready = !doc.loading && !!doc.data
+  useEffect(() => {   // ?print=1 / ?download=1 from the list icons
+    if (!ready) return
+    const act = sp.get('print') ? 'print' : sp.get('download') ? 'download' : null
+    if (!act) return
+    setSp({}, { replace: true })
+    setTimeout(() => (act === 'print' ? window.print() : pdf(`${doc.data.number || table}`)), 400)
+  }, [ready]) // eslint-disable-line react-hooks/exhaustive-deps
   if (doc.loading) return <Loading />
   if (doc.error) return <ErrorBox error={doc.error} />
   const d = doc.data
@@ -82,7 +96,8 @@ export default function InvoiceView({ kind }) {
         <div className="row gap-s wrap">
           {d.sale_channel === 'walkin' && <Badge tone="violet">Walk-in sale</Badge>}
           <StatusBadge list={kind === 'invoice' ? INVOICE_STATUS : QUOTE_STATUS} value={d.status} />
-          {!DEMO && <Button variant="outline" icon={Printer} onClick={() => window.print()}>Print / PDF</Button>}
+          <Button variant="outline" icon={Printer} onClick={() => window.print()}>Print</Button>
+          <Button variant="outline" icon={Download} loading={pdfBusy} onClick={() => pdf(`${d.number}${c?.name ? ' ' + c.name : ''}`)}>Download PDF</Button>
           {(c?.whatsapp || c?.phone) && <Button variant="outline" icon={MessageCircle} onClick={share}>WhatsApp</Button>}
           {canEdit && <Button variant="outline" icon={Copy} onClick={duplicate}>Duplicate</Button>}
           {canEdit && d.status === 'draft' && <Button variant="outline" icon={Send} onClick={() => setStatus('sent', 'Marked as sent')}>Mark sent</Button>}
@@ -97,7 +112,7 @@ export default function InvoiceView({ kind }) {
         </div>
       </div>
 
-      <div className="doc">
+      <div className="doc" ref={docRef}>
         <div className="doc-head">
           <div>
             <img src="/logo-full.png" alt={st.company_name} />

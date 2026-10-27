@@ -5,7 +5,7 @@ import { supabase, q } from '../../lib/supabase'
 import { useData } from '../../lib/hooks'
 import { QUOTE_STATUS } from '../../lib/constants'
 import { money, date, daysFrom } from '../../lib/format'
-import { PageHeader, Button, Badge, StatusBadge, Stat, Select, SearchInput, Loading, Empty, Member } from '../../components/ui'
+import { PageHeader, Button, Badge, StatusBadge, Stat, Select, SearchInput, Loading, Empty, Member, DocActions } from '../../components/ui'
 import DocEditor from './DocEditor'
 
 export default function Quotations() {
@@ -37,7 +37,7 @@ export default function Quotations() {
       </div>
       {loading ? <Loading /> : rows.length === 0 ? <Empty icon={FileSignature} title="No quotations yet" /> : (
         <div className="card table-wrap"><table className="table">
-          <thead><tr><th>Quote</th><th>For</th><th>Date</th><th>Valid until</th><th>Status</th><th>By</th><th className="num">Total</th></tr></thead>
+          <thead><tr><th>Quote</th><th>For</th><th>Date</th><th>Valid until</th><th>Status</th><th>By</th><th className="num">Total</th><th /></tr></thead>
           <tbody>{rows.map((x) => {
             const exp = x.status === 'sent' && x.valid_until && daysFrom(x.valid_until) < 0
             return (
@@ -49,6 +49,7 @@ export default function Quotations() {
                 <td><StatusBadge list={QUOTE_STATUS} value={x.status} /></td>
                 <td><Member id={x.created_by} size={22} showName={false} /></td>
                 <td className="num strong">{money(x.total)}</td>
+                <td><DocActions to={`/finance/quotations/${x.id}`} /></td>
               </tr>)
           })}</tbody></table></div>
       )}

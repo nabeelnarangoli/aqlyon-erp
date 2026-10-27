@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
-import { Plus, Truck, Wallet, Pencil, Trash2, Split, PackageCheck, ArrowLeft, Phone, MessageCircle, Download } from 'lucide-react'
+import { Plus, Truck, Wallet, Pencil, Trash2, Split, PackageCheck, ArrowLeft, Phone, MessageCircle, Download, Printer } from 'lucide-react'
+import { downloadPdf } from '../../lib/pdf'
 import { supabase, q } from '../../lib/supabase'
 import { useData } from '../../lib/hooks'
 import { useAuth } from '../../lib/auth'
@@ -351,8 +352,10 @@ export function WorkOrderModal({ order = {}, onClose, onSaved }) {
 
 /* =========================================================== Work order detail */
 export function WorkOrderView({ id, onClose }) {
-  const { has, member } = useAuth()
-  const { confirm } = useToast()
+  const { has, member, settings } = useAuth()
+  const { confirm, toast } = useToast()
+  const woRef = useRef()
+  const [pdfBusy, setPdfBusy] = useState(false)
   const [editing, setEditing] = useState(false)
   const [paying, setPaying] = useState(null)
   const [busy, run] = useAction()
@@ -374,9 +377,19 @@ export function WorkOrderView({ id, onClose }) {
         {has('suppliers.manage') && <IconBtn icon={Trash2} title="Delete" onClick={del} />}
         <div className="grow" />
         {x.work_status !== 'received' && x.work_status !== 'cancelled' && <Button variant="outline" icon={PackageCheck} loading={busy} onClick={() => setWork('received')}>Work received</Button>}
+        <IconBtn icon={Printer} title="Print" onClick={() => window.print()} />
+        <IconBtn icon={Download} title="Download PDF" onClick={async () => { setPdfBusy(true); try { await downloadPdf(woRef.current, `${x.number} ${x.suppliers?.name || ''}`) } catch (e) { toast(e.message, 'error') } finally { setPdfBusy(false) } }} disabled={pdfBusy} />
         <Button variant="outline" icon={Pencil} onClick={() => setEditing(true)}>Edit</Button>
         {isFin && balance > 0 && <Button icon={Wallet} onClick={() => setPaying({ kind: Number(x.amount_paid) > 0 ? 'final' : 'advance', amount: Number(x.amount_paid) > 0 ? balance : '' })}>Pay supplier</Button>}
       </>}>
+      <div ref={woRef} className="wo-doc">
+      <div className="print-only" style={{ marginBottom: 16 }}>
+        <div className="row between" style={{ alignItems: 'flex-start' }}>
+          <div><img src="/logo-full.png" alt="" style={{ height: 40 }} /><div className="small" style={{ marginTop: 6, color: '#555', maxWidth: 300 }}>{settings?.address}<br />{[settings?.phone, settings?.email].filter(Boolean).join(' · ')}</div></div>
+          <div className="right"><h2 style={{ margin: 0 }}>WORK ORDER</h2><div className="strong">{x.number}</div><div className="small">Date: {date(x.order_date)}{x.due_date && <><br />Needed by: {date(x.due_date)}</>}</div></div>
+        </div>
+        <div className="small" style={{ marginTop: 12 }}><b>To:</b> {x.suppliers?.name}{x.suppliers?.contact_person && ` · ${x.suppliers.contact_person}`}{x.suppliers?.phone && ` · ${x.suppliers.phone}`}</div>
+      </div>
       <div className="stats" style={{ gridTemplateColumns: 'repeat(3, minmax(0,1fr))' }}>
         <Stat label="Order total" value={money(x.total)} />
         <Stat label="Paid" value={money(x.amount_paid)} tone="teal" />
@@ -416,6 +429,7 @@ export function WorkOrderView({ id, onClose }) {
         )}
         {!isFin && balance > 0 && <p className="small faint mt">Finance records supplier payments.</p>}
       </Card>
+      </div>
       {editing && <WorkOrderModal order={{ ...x, alloc: (x.supplier_bill_allocations || []).map((a) => ({ client_id: a.client_id, invoice_id: a.invoice_id || '', amount: a.amount })) }}
         onClose={() => setEditing(false)} onSaved={() => { setEditing(false); b.reload() }} />}
       {paying && <SupplierPaymentModal bill={x} preset={paying} onClose={() => setPaying(null)} onSaved={() => { setPaying(null); pays.reload(); b.reload() }} />}
