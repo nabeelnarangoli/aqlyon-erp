@@ -395,6 +395,8 @@ create table if not exists public.time_logs (
   note        text,
   created_at  timestamptz not null default now()
 );
+-- what was done, typed freely ("Client meeting", "Reel editing for Star Health") — with or without a task
+alter table public.time_logs add column if not exists activity text;
 
 -- ---------------------------------------------------------------------
 -- 5. TEAM QUERIES (cross-team questions / tickets)
