@@ -27,6 +27,7 @@ const Payments = lazy(() => import('./pages/finance/Payments'))
 const Expenses = lazy(() => import('./pages/finance/Expenses'))
 const Suppliers = lazy(() => import('./pages/finance/Suppliers'))
 const WorkOrders = lazy(() => import('./pages/finance/Suppliers').then((m) => ({ default: m.WorkOrders })))
+const SocialReports = lazy(() => import('./pages/reports/SocialReports'))
 const Reports = lazy(() => import('./pages/reports/Reports'))
 const Team = lazy(() => import('./pages/admin/Team'))
 const SettingsPage = lazy(() => import('./pages/admin/Settings'))
@@ -96,6 +97,8 @@ function Gate() {
           <Route path="finance/suppliers" element={<Guard perm={['suppliers.view', 'suppliers.manage', 'suppliers.pay', 'expenses.manage', 'payments.manage']}><Suppliers /></Guard>} />
           <Route path="finance/suppliers/:id" element={<Guard perm={['suppliers.view', 'suppliers.manage', 'suppliers.pay', 'expenses.manage', 'payments.manage']}><Suppliers /></Guard>} />
           <Route path="finance/work-orders" element={<Guard perm={['suppliers.view', 'suppliers.manage', 'suppliers.pay']}><WorkOrders /></Guard>} />
+          <Route path="social" element={<Guard perm={['calendar.view', 'calendar.manage', 'clients.view', 'clients.manage', 'reports.content']}><SocialReports /></Guard>} />
+          <Route path="social/:id" element={<Guard perm={['calendar.view', 'calendar.manage', 'clients.view', 'clients.manage', 'reports.content']}><SocialReports /></Guard>} />
           <Route path="reports" element={<Guard perm={REPORT_PERMS}><Reports /></Guard>} />
           <Route path="team" element={<Guard perm={['team.manage']}><Team /></Guard>} />
           <Route path="settings" element={<Guard perm={['settings.manage']}><SettingsPage /></Guard>} />

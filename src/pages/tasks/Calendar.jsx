@@ -7,7 +7,7 @@ import { useAuth } from '../../lib/auth'
 import { POST_STATUSES, POST_TYPES, PLATFORMS, CONTENT_PILLARS, TASK_STATUSES, byId } from '../../lib/constants'
 import { toISO, todayISO, date, addDays, n } from '../../lib/format'
 import {
-  PageHeader, Button, Badge, StatusBadge, Modal, Field, Input, Select, Textarea, Chips, ClientSelect, Loading, Empty, Progress, IconBtn,
+  PageHeader, Button, Badge, StatusBadge, Modal, Field, Input, Select, Textarea, Chips, ClientSelect, MemberSelect, Loading, Empty, Progress, IconBtn,
   useAction, useForm, useToast, cx, Card
 } from '../../components/ui'
 import { TaskModal } from './TaskForm'
@@ -149,7 +149,7 @@ function PostModal({ post, readOnly, onClose, onSaved }) {
   const nav = useNavigate()
   const { confirm, toast } = useToast()
   const [f, set, setF] = useForm({ client_id: '', publish_date: todayISO(), publish_time: '', platforms: ['Instagram', 'Facebook'], post_type: 'Post', pillar: '', title: '', caption: '',
-    hashtags: '', cta: '', media_link: '', status: 'idea', published_url: '', reach: 0, likes: 0, comments: 0, shares: 0, saves: 0, design_task_id: null, client_note: '', ...post })
+    hashtags: '', cta: '', media_link: '', status: 'idea', published_url: '', reach: 0, likes: 0, comments: 0, shares: 0, saves: 0, design_task_id: null, client_note: '', assignee_id: '', ...post })
   const isNew = !f.id
   const [makeTask, setMakeTask] = useState(false)
   const [busy, run] = useAction()
@@ -159,7 +159,7 @@ function PostModal({ post, readOnly, onClose, onSaved }) {
     const p = { ...f }
     ;['id', 'created_at', 'updated_at', 'created_by', 'clients', 'design_tasks', 'client_decided_at'].forEach((k) => delete p[k])
     ;['reach', 'likes', 'comments', 'shares', 'saves'].forEach((k) => (p[k] = Number(p[k] || 0)))
-    p.publish_time = p.publish_time || null; p.design_task_id = p.design_task_id || null
+    p.publish_time = p.publish_time || null; p.design_task_id = p.design_task_id || null; p.assignee_id = p.assignee_id || null
     return p
   }
   const save = (e) => { e?.preventDefault(); return run(async () => {
@@ -192,6 +192,7 @@ function PostModal({ post, readOnly, onClose, onSaved }) {
           <Field label="Publish date" required><Input type="date" required value={f.publish_date} onChange={set('publish_date')} /></Field>
           <Field label="Time"><Input type="time" value={f.publish_time} onChange={set('publish_time')} /></Field>
           <Field label="Post type"><Select placeholder={false} options={POST_TYPES} value={f.post_type} onChange={set('post_type')} /></Field>
+          <Field label="Assigned to"><MemberSelect value={f.assignee_id} onChange={set('assignee_id')} /></Field>
           <Field label="Content pillar"><Select options={CONTENT_PILLARS} value={f.pillar} onChange={set('pillar')} /></Field>
           <Field label="Platforms" span={2}><Chips options={PLATFORMS.slice(0, 7)} value={f.platforms || []} onChange={set('platforms')} /></Field>
           <Field label="Title / topic" span={2} required><Input required value={f.title} onChange={set('title')} placeholder="e.g. Diwali greeting, New menu launch" /></Field>

@@ -1263,6 +1263,36 @@ grant execute on function public.walkin_find(text) to authenticated;
 grant execute on function public.walkin_sale(uuid, text, text, jsonb, numeric, numeric, text, text, text) to authenticated;
 grant execute on function public.walkin_collect(uuid, numeric, text, text) to authenticated;
 
+-- ---------------------------------------------------------------------
+-- 10e. CLIENT SOCIAL MEDIA REPORTS
+--   Weekly account KPIs per client & platform (Week 1 = days 1–7 of the month,
+--   Week 2 = 8–14, Week 3 = 15–21, Week 4 = 22–28, Week 5 = 29–end).
+--   The content log itself comes from content_posts (the calendar).
+-- ---------------------------------------------------------------------
+alter table public.content_posts add column if not exists assignee_id uuid references public.profiles(id) on delete set null;
+
+create table if not exists public.social_kpis (
+  id               uuid primary key default gen_random_uuid(),
+  client_id        uuid not null references public.clients(id) on delete cascade,
+  platform         text not null default 'Instagram',
+  month            date not null,                 -- first day of the month
+  week_no          int  not null check (week_no between 1 and 5),
+  reach            int,
+  content_shared   int,
+  new_followers    int,
+  profile_visits   int,
+  story_views      int,
+  post_views       int,
+  interactions     int,
+  total_followers  int,
+  followers_pct    numeric(5,2) check (followers_pct between 0 and 100),   -- share of views from followers; non-followers = 100 − this
+  notes            text,
+  updated_by       uuid references public.profiles(id) on delete set null default auth.uid(),
+  updated_at       timestamptz not null default now(),
+  unique (client_id, platform, month, week_no)
+);
+create index if not exists idx_kpi_client_month on public.social_kpis(client_id, month);
+
 -- every money movement in one place (in = client payments, out = supplier payments + expenses)
 create or replace view public.v_money_movements with (security_invoker = true) as
 select p.id, p.paid_on as on_date, 'in'::text as direction, 'Client payment'::text as kind, p.amount, p.method, p.reference, p.note,
@@ -1382,7 +1412,7 @@ do $$ declare t text; begin
   foreach t in array array['roles','staff_pay','profiles','settings','services','leads','clients','packages','interactions','projects',
     'design_tasks','task_proofs','task_comments','time_logs','queries','query_replies','content_posts','approval_links',
     'quotations','invoices','payments','expenses','notifications','activity_log',
-    'suppliers','supplier_bills','supplier_bill_allocations','supplier_payments','reimbursements'] loop
+    'suppliers','supplier_bills','supplier_bill_allocations','supplier_payments','reimbursements','social_kpis'] loop
     execute format('alter table public.%I enable row level security', t);
   end loop;
 end $$;
@@ -1481,6 +1511,8 @@ create policy p_qr_ins on public.query_replies for insert to authenticated
   with check (author_id = auth.uid() and exists (select 1 from public.queries q where q.id = query_id));
 
 -- content calendar & client approval links
+create policy p_kpi_read  on public.social_kpis for select to authenticated using (public.has_perm('calendar.view', 'calendar.manage', 'clients.view', 'clients.manage', 'reports.content'));
+create policy p_kpi_write on public.social_kpis for all to authenticated using (public.has_perm('calendar.manage', 'clients.manage')) with check (public.has_perm('calendar.manage', 'clients.manage'));
 create policy p_post_read  on public.content_posts for select to authenticated using (public.has_perm('calendar.view', 'calendar.manage'));
 create policy p_post_write on public.content_posts for all to authenticated using (public.has_perm('calendar.manage')) with check (public.has_perm('calendar.manage'));
 create policy p_links on public.approval_links for all to authenticated

@@ -403,3 +403,15 @@ select.input { padding-right: 28px; appearance: none; background-image: url("dat
   .modal-head, .modal-foot { display: none; }
   .modal-body { padding: 0; overflow: visible; }
 }
+
+/* client social report */
+.print-only { display: none; }
+.input.invalid { border-color: var(--red); background: #fff5f5; }
+.kpi-grid td, .kpi-grid th { padding-left: 6px; padding-right: 6px; }
+@media print {
+  .print-only { display: block; }
+  img.print-only { display: inline-block; }
+  .social-report .card { break-inside: avoid; box-shadow: none; }
+  .kpi-grid .input { border: 0; background: none; padding: 0; width: auto !important; }
+  .kpi-grid .input::placeholder { color: transparent; }
+}

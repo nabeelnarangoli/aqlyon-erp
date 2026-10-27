@@ -215,4 +215,16 @@ select pg_temp.as_user('00000000-0000-0000-0000-00000000000c');
 select 'walkin_customer reuses by phone' t, walkin_customer('Someone', '98470-12345') = (select id from clients where customer_type='walkin' limit 1);
 select 'walkin_customer creates new' t, walkin_customer('Fresh Visitor', '9000000001') is not null;
 reset role;
+-- ===== SOCIAL KPIs: marketer records a week, designer (no calendar.manage) cannot
+select pg_temp.as_user('00000000-0000-0000-0000-00000000000b');
+insert into social_kpis(client_id, platform, month, week_no, reach, new_followers, post_views, interactions, followers_pct)
+  select id, 'Instagram', date_trunc('month', current_date)::date, 1, 380, 1, 1200, 196, 70 from clients where customer_type='regular' limit 1;
+insert into social_kpis(client_id, platform, month, week_no, reach) select client_id, platform, month, 1, 400 from social_kpis
+  on conflict (client_id, platform, month, week_no) do update set reach = excluded.reach;
+select 'kpi upsert' t, count(*), max(reach) from social_kpis;
+reset role;
+select pg_temp.as_user('00000000-0000-0000-0000-00000000000d');
+do $$ begin begin insert into social_kpis(client_id, month, week_no) select id, current_date, 2 from clients limit 1; raise exception 'FAIL finance wrote kpi';
+  exception when insufficient_privilege then raise notice 'ok'; end; end $$;
+reset role;
 select 'ALL TESTS PASSED' as result;

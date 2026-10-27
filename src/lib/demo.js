@@ -3,7 +3,7 @@ import { DEFAULT_ROLES } from './permissions'
 // database triggers/RPCs from supabase/schema.sql, on sample data kept in localStorage.
 // Only used when the app is built with VITE_DEMO=1.
 
-const KEY = 'aqlyon-erp-demo-v6'
+const KEY = 'aqlyon-erp-demo-v7'
 const SKEY = 'aqlyon-erp-demo-session'
 const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : 'id-' + Math.random().toString(36).slice(2) + Date.now().toString(36))
 const nowISO = () => new Date().toISOString()
@@ -35,7 +35,7 @@ const myRoleId = () => T('profiles').find((p) => p.id === uid())?.role_id
 const READ = {
   leads: ['leads.view', 'leads.manage'], interactions: ['leads.view', 'leads.manage', 'clients.manage'],
   packages: ['packages.view', 'packages.manage', 'invoices.manage'], projects: ['projects.view', 'projects.manage', 'tasks.view', 'tasks.work', 'tasks.manage'],
-  content_posts: ['calendar.view', 'calendar.manage'], approval_links: ['calendar.manage', 'clients.manage'],
+  content_posts: ['calendar.view', 'calendar.manage'], social_kpis: ['calendar.view', 'calendar.manage', 'clients.view', 'clients.manage', 'reports.content'], approval_links: ['calendar.manage', 'clients.manage'],
   quotations: ['quotations.view', 'quotations.manage'], invoices: ['invoices.view', 'invoices.manage', 'payments.manage'], v_invoice_status: ['invoices.view', 'invoices.manage', 'payments.manage'],
   payments: ['payments.manage', 'invoices.view', 'invoices.manage', 'reports.finance'], expenses: ['expenses.manage', 'payments.manage', 'reports.finance', 'reports.clients'], reimbursements: ['expenses.manage', 'payments.manage', 'reports.finance'],
   suppliers: ['suppliers.view', 'suppliers.manage', 'suppliers.pay', 'expenses.manage', 'payments.manage', 'reports.finance'], supplier_bills: ['suppliers.view', 'suppliers.manage', 'suppliers.pay', 'reports.finance', 'reports.clients'],
@@ -45,7 +45,7 @@ const READ = {
 }
 const WRITE = {
   leads: ['leads.manage'], interactions: ['leads.manage', 'clients.manage'], clients: ['clients.manage', 'leads.manage'], packages: ['packages.manage'],
-  projects: ['projects.manage'], design_tasks: ['tasks.manage', 'tasks.review', 'tasks.work'], content_posts: ['calendar.manage'], approval_links: ['calendar.manage', 'clients.manage'],
+  projects: ['projects.manage'], social_kpis: ['calendar.manage', 'clients.manage'], design_tasks: ['tasks.manage', 'tasks.review', 'tasks.work'], content_posts: ['calendar.manage'], approval_links: ['calendar.manage', 'clients.manage'],
   quotations: ['quotations.manage'], invoices: ['invoices.manage', 'payments.manage'], payments: ['payments.manage'], expenses: ['expenses.manage'], reimbursements: ['expenses.manage', 'payments.manage'],
   suppliers: ['suppliers.manage', 'expenses.manage'], supplier_bills: ['suppliers.manage'], supplier_bill_allocations: ['suppliers.manage'], supplier_payments: ['suppliers.pay'],
   roles: ['team.manage'], staff_pay: ['team.manage'], settings: ['settings.manage'], services: ['settings.manage', 'quotations.manage', 'invoices.manage']
@@ -360,6 +360,7 @@ class Query {
         const out = []
         for (const v of list) {
           if (this.op === 'upsert' && v.id) { const ex = T(t).find((r) => r.id === v.id); if (ex) { Object.assign(ex, v); out.push(ex); continue } }
+          if (this.op === 'upsert' && t === 'social_kpis') { const ex = T(t).find((r) => r.client_id === v.client_id && r.platform === v.platform && r.month === v.month && r.week_no === v.week_no); if (ex) { Object.assign(ex, v, { updated_at: nowISO() }); out.push(ex); continue } }
           if (this.op === 'upsert' && t === 'staff_pay') { const ex = T(t).find((r) => r.user_id === v.user_id); if (ex) { Object.assign(ex, v); payCalc(ex); out.push(ex); continue } }
           const r = { ...(DEFAULTS[t]?.() || {}), ...Object.fromEntries(Object.entries(v).filter(([, x]) => x !== undefined)) }
           r.id ||= uuid(); r.created_at ||= nowISO()
@@ -729,6 +730,32 @@ function seed() {
   ins('supplier_bill_allocations', { bill_id: printPO.id, client_id: c3.id, invoice_id: T('invoices').find((i) => i.client_id === c3.id)?.id, amount: 3500 })
   ins('supplier_bill_allocations', { bill_id: printPO.id, client_id: c1.id, amount: 4500 })
   ins('supplier_payments', { bill_id: printPO.id, paid_on: day(-4), amount: 4000, kind: 'advance', method: 'Cash', note: '50% advance' })
+  // ---- social media clients, with the real weekly numbers from the marketer's KPI sheet ----
+  as(ad)
+  const dm = (k, d) => { const m = mStart(k); return m.slice(0, 8) + String(d).padStart(2, '0') }
+  const star = ins('clients', { name: 'Star Health Insurance Koyilandy', contact_person: 'Branch Manager', phone: '9447001100', city: 'Koyilandy', industry: 'Insurance', instagram: '@star_healthinsurancekoyilandy_', account_manager_id: mk, onboarded_on: dm(-2, 28) })
+  const sparrow = ins('clients', { name: 'Sparrow Bell', contact_person: 'Owner', phone: '9447001200', city: 'Koyilandy', industry: 'Retail', instagram: '@sparrowbellco', account_manager_id: mk, onboarded_on: dm(-2, 20) })
+  const xmart = ins('clients', { name: 'Express Mart Koyilandy', contact_person: 'Manager', phone: '9447001300', city: 'Koyilandy', industry: 'Supermarket', instagram: '@expressmartqld', account_manager_id: mk, onboarded_on: dm(-2, 14) })
+  ins('packages', { client_id: star.id, name: 'Social Media – Insurance', fee: 9000, posts_per_month: 12, stories_per_month: 4, platforms: ['Instagram', 'Facebook'], start_date: dm(-2, 1) })
+  ins('packages', { client_id: sparrow.id, name: 'Social Media – Growth', fee: 14000, posts_per_month: 12, stories_per_month: 8, reels_per_month: 2, platforms: ['Instagram', 'Facebook'], start_date: dm(-2, 1) })
+  ins('packages', { client_id: xmart.id, name: 'Social Media – Starter', fee: 8000, posts_per_month: 10, stories_per_month: 4, platforms: ['Instagram', 'Facebook'], start_date: dm(-2, 1) })
+  const SP = (c, k, d, title, o = {}) => ins('content_posts', { client_id: c.id, publish_date: dm(k, d), title, post_type: 'Post', platforms: ['Instagram', 'Facebook'], status: 'published', published_url: 'https://instagram.com/p/demo', assignee_id: d % 2 ? d2 : d1, ...o })
+  for (const [d, t, o] of [[1, 'Malayalam health tip – monsoon fevers'], [2, 'Malayalam health tip – sugar check'], [4, 'Why health insurance early?'], [5, "Teachers' Day"], [8, 'Malayalam health related – cashless claims'], [11, 'Claim settlement story'], [14, 'Bill related – hospital bill shock'], [23, 'Health insurance highlight', { post_type: 'Story' }], [26, 'Health importance – Malayalam content'], [29, 'World Heart Day']]) SP(star, -1, d, t, o)
+  for (const [d, t, o] of [[1, 'Malayalam health tip – BP'], [3, 'Family floater explained'], [6, 'Senior citizen plan'], [8, 'Malayalam health tip – dengue'], [10, 'World Mental Health Day'], [13, 'Tax saving with health insurance', { post_type: 'Story' }], [15, 'Claim helpline story', { post_type: 'Story' }], [17, 'Customer review'], [20, 'Diwali greeting', { status: 'approved', published_url: null }], [22, 'Top-up plans', { status: 'client_approval', published_url: null }], [24, 'Malayalam health tip – heart', { status: 'internal_review', published_url: null }], [27, 'Renewal reminder', { status: 'in_design', published_url: null }], [29, 'Hospital network list', { status: 'idea', published_url: null }]]) SP(star, 0, d, t, o)
+  for (const [d, t, o] of [[2, 'New arrivals – kids wear'], [3, 'Story: new stock', { post_type: 'Story' }], [5, 'Onam collection'], [6, 'Reel: store walkthrough', { post_type: 'Reel' }], [9, 'Weekend offer'], [10, 'Story: poll', { post_type: 'Story' }], [12, 'Festive gift ideas'], [16, 'Customer pick'], [18, 'Story: offer', { post_type: 'Story' }], [20, 'Back to school'], [23, 'Store timings'], [26, 'Reel: try-on', { post_type: 'Reel' }], [28, 'Month-end sale']]) SP(sparrow, -1, d, t, o)
+  for (const [d, t, o] of [[2, 'Gandhi Jayanti'], [4, 'Story: new stock', { post_type: 'Story' }], [7, 'Diwali collection teaser'], [9, 'Reel: Diwali looks', { post_type: 'Reel' }], [11, 'Story: poll', { post_type: 'Story' }], [14, 'Kids party wear'], [18, 'Diwali offer', { status: 'scheduled', published_url: null }], [21, 'Story: countdown', { post_type: 'Story', status: 'client_approval', published_url: null }], [25, 'Gift cards', { status: 'in_design', published_url: null }]]) SP(sparrow, 0, d, t, o)
+  for (const [d, t, o] of [[16, 'Fresh vegetables daily'], [18, 'Weekend combo offer'], [20, 'Story: today’s deals', { post_type: 'Story' }], [23, 'Onam kit'], [25, 'Home delivery'], [27, 'Story: fresh fish', { post_type: 'Story' }], [29, 'Banner: Grand offer', { post_type: 'Banner' }]]) SP(xmart, -1, d, t, o)
+  for (const [d, t, o] of [[2, 'Monthly grocery kit'], [5, 'Story: deals', { post_type: 'Story' }], [9, 'Diwali sweets'], [12, 'Free delivery above ₹999'], [16, 'Snacks festival', { status: 'approved', published_url: null }], [22, 'Diwali hampers', { status: 'internal_review', published_url: null }]]) SP(xmart, 0, d, t, o)
+  const K = (c, platform, k, rows) => rows.forEach((r, i) => { if (!r) return; const [reach, content_shared, new_followers, profile_visits, story_views, post_views, interactions, followers_pct] = r
+    ins('social_kpis', { client_id: c.id, platform, month: mStart(k), week_no: i + 1, reach, content_shared, new_followers, profile_visits, story_views, post_views, interactions, followers_pct }) })
+  K(star, 'Instagram', -1, [[256, 8, 1, 18, 0, 256, 4, 38.3], [143, 4, 4, 7, 41, 102, 2, 80.4], [302, 3, 3, 20, 45, 250, 1, 43], [77, 6, 9, 23, 83, 1300, 12, 56]])
+  K(star, 'Facebook', -1, [[null, 4, 1, 9, 0, 108, 2, 8.3], [null, 2, 1, 23, 0, 79, 6, 14], [null, 2, 0, 0, 0, 4, 1, 25], [null, 5, 0, 2, 0, 88, 3, 14.3]])
+  K(star, 'Instagram', 0, [[35, 2, 1, 14, 55, 103, 1, null], [2300, 5, 2, 25, 0, 2900, 26, 57.1], [1200, 6, 1, 29, 93, 1800, 6, null]])
+  K(star, 'Facebook', 0, [[null, 2, 0, 2, 0, null, 1, null], [1900, 6, 2, 25, 0, 2900, 26, null], [2500, 6, 3, 33, 0, 1100, 39, null]])
+  K(sparrow, 'Instagram', -1, [[380, 8, 1, 35, 225, 1200, 196, null], [457, 2, 1, 28, 409, 392, 162, 70], [161, 4, 0, 19, 234, 430, 25, null], [98, 8, 0, 26, 146, 597, 22, null]])
+  K(sparrow, 'Facebook', -1, [[null, 8, 0, 34, 0, 134, 13, 16.5], [null, 3, 0, 10, 0, 76, 3, 19.7], [null, 3, 1, 0, 0, 15, 5, 27.3], [null, 8, 0, 15, 0, 371, 5, null]])
+  K(xmart, 'Instagram', -1, [[727, 4, 2, 29, 150, 555, null, 55.3], [864, 7, 21, 56, 201, 647, null, 74.2], [514, 9, 0, 12, 194, 58, 6, 86], [459, 6, 0, 15, 139, 314, null, null]])
+  K(xmart, 'Facebook', 0, [[null, null, 0, 17, null, null, 0, null], [null, 1, 11, 52, null, 47, 1, 30.7], [null, 4, 1, 1, 0, 29, 2, null]])
   as(d1)
   rpc('walkin_sale', { p_name: 'Rasheed K', p_phone: '9847012345', p_items: [{ description: 'Visiting card design', qty: 1, rate: 800 }, { description: 'Printing 100 nos', qty: 1, rate: 450 }], p_discount: 50, p_paid: 1000, p_method: 'Cash' })
   as(mk)

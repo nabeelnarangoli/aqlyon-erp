@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import {
   LayoutDashboard, Target, Building2, PhoneCall, Megaphone, Palette, CalendarDays, MessagesSquare,
-  FileText, FileSignature, Wallet, Receipt, BarChart3, Users, Settings, LogOut, Bell, Menu, Clock, CheckCheck, Truck, Store, ShoppingBag
+  FileText, FileSignature, Wallet, Receipt, BarChart3, Users, Settings, LogOut, Bell, Menu, Clock, CheckCheck, Truck, Store, ShoppingBag, TrendingUp
 } from 'lucide-react'
 import { useAuth } from '../lib/auth'
 import { supabase, q, DEMO } from '../lib/supabase'
@@ -38,6 +38,7 @@ const NAV = [
     { to: '/finance/expenses', label: 'Expenses', icon: Receipt, perm: ['expenses.manage'] }
   ] },
   { group: 'Insights', items: [
+    { to: '/social', label: 'Client social reports', icon: TrendingUp, perm: ['calendar.view', 'calendar.manage', 'clients.view', 'clients.manage', 'reports.content'] },
     { to: '/reports', label: 'Reports', icon: BarChart3, perm: REPORT_PERMS }
   ] },
   { group: 'Admin', items: [

@@ -81,7 +81,29 @@ export const POST_STATUSES = [
   { id: 'published',       label: 'Published',       tone: 'dark' },
   { id: 'cancelled',       label: 'Cancelled',       tone: 'red' }
 ]
-export const POST_TYPES = ['Post', 'Carousel', 'Reel', 'Story', 'Video', 'Ad', 'Blog', 'Live']
+export const POST_TYPES = ['Post', 'Carousel', 'Reel', 'Story', 'Video', 'Banner', 'Ad', 'Blog', 'Live', 'Other']
+// how post types roll up in client reports (matches the marketer's sheet: Poster / Story / Reel / Banner / Other)
+export const DELIVERY_KINDS = [
+  { id: 'poster', label: 'Posters', types: ['Post', 'Carousel', 'Ad'], quota: (p) => (p.posts_per_month || 0) + (p.carousels_per_month || 0) },
+  { id: 'story', label: 'Stories', types: ['Story'], quota: (p) => p.stories_per_month || 0 },
+  { id: 'reel', label: 'Reels / motion', types: ['Reel', 'Video', 'Live'], quota: (p) => p.reels_per_month || 0 },
+  { id: 'banner', label: 'Banners', types: ['Banner'], quota: () => 0 },
+  { id: 'other', label: 'Other', types: ['Blog', 'Other'], quota: () => 0 }
+]
+export const kindOf = (type) => DELIVERY_KINDS.find((k) => k.types.includes(type))?.id || 'other'
+export const DONE_POST = ['approved', 'scheduled', 'published']
+// weekly account KPIs, in the order of the marketer's KPI sheet
+export const KPI_FIELDS = [
+  { id: 'reach', label: 'Reach' },
+  { id: 'content_shared', label: 'Content shared' },
+  { id: 'new_followers', label: 'New followers' },
+  { id: 'profile_visits', label: 'Profile visits' },
+  { id: 'story_views', label: 'Story views' },
+  { id: 'post_views', label: 'Post views' },
+  { id: 'interactions', label: 'Interactions' },
+  { id: 'followers_pct', label: 'Followers %', pct: true }
+]
+export const KPI_PLATFORMS = ['Instagram', 'Facebook', 'YouTube', 'LinkedIn', 'Google Business']
 export const CONTENT_PILLARS = ['Educational', 'Promotional', 'Engagement', 'Behind the scenes', 'Testimonial', 'Festival / Occasion',
   'Product showcase', 'Offer', 'Announcement', 'Brand story', 'User generated']
 
