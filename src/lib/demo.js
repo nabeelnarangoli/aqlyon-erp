@@ -3,7 +3,7 @@ import { DEFAULT_ROLES } from './permissions'
 // database triggers/RPCs from supabase/schema.sql, on sample data kept in localStorage.
 // Only used when the app is built with VITE_DEMO=1.
 
-const KEY = 'aqlyon-erp-demo-v7'
+const KEY = 'aqlyon-erp-demo-v8'
 const SKEY = 'aqlyon-erp-demo-session'
 const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : 'id-' + Math.random().toString(36).slice(2) + Date.now().toString(36))
 const nowISO = () => new Date().toISOString()
@@ -67,7 +67,7 @@ const DEFAULTS = {
   time_logs: () => ({ user_id: uid(), log_date: iso(new Date()), billable: true }),
   queries: () => ({ category: 'General', priority: 'normal', status: 'open', from_user: uid(), updated_at: nowISO() }),
   query_replies: () => ({ author_id: uid() }),
-  content_posts: () => ({ platforms: ['Instagram'], post_type: 'Post', status: 'idea', reach: 0, likes: 0, comments: 0, shares: 0, saves: 0, created_by: uid(), updated_at: nowISO() }),
+  content_posts: () => ({ results: [], platforms: ['Instagram'], post_type: 'Post', status: 'idea', reach: 0, likes: 0, comments: 0, shares: 0, saves: 0, created_by: uid(), updated_at: nowISO() }),
   approval_links: () => ({ token: uuid().replace(/-/g, '').slice(0, 36), expires_at: new Date(Date.now() + 30 * 86400000).toISOString(), revoked: false, created_by: uid() }),
   quotations: () => ({ issue_date: iso(new Date()), valid_until: day(15), items: [], discount: 0, status: 'draft', created_by: uid() }),
   invoices: () => ({ sale_channel: 'office', issue_date: iso(new Date()), due_date: day(7), items: [], discount: 0, amount_paid: 0, status: 'draft', created_by: uid() }),
@@ -144,8 +144,16 @@ function setTaskStatus(t, status) {
   t.status = status
   afterTaskUpdate(old, t)
 }
+// mirrors post_results_sync(): per-platform results roll up into the single total columns
+function postResults(r) {
+  if (!Array.isArray(r.results)) r.results = []
+  if (!r.results.length) return
+  const sum = (k) => r.results.reduce((a, x) => a + (Number(x[k]) || 0), 0)
+  Object.assign(r, { published_url: r.results.find((x) => x.url)?.url || null, reach: sum('reach'), likes: sum('likes'), comments: sum('comments'), shares: sum('shares'), saves: sum('saves') })
+}
 function beforeInsert(table, r) {
   const st = settings()
+  if (table === 'content_posts') postResults(r)
   if (table === 'invoices') { if (!r.number) r.number = `${st.invoice_prefix}-${String(r.issue_date).slice(0, 4)}-${String(seq('invoice')).padStart(4, '0')}`; totals(r) }
   if (table === 'quotations') { if (!r.number) r.number = `${st.quote_prefix}-${String(r.issue_date).slice(0, 4)}-${String(seq('quote')).padStart(4, '0')}`; totals(r) }
   if (table === 'design_tasks' && !r.code) r.code = `${st.task_prefix}-${1000 + seq('task')}`
@@ -200,6 +208,7 @@ function afterTaskUpdate(old, t) {
 function afterUpdate(table, old, r) {
   if (['leads', 'clients', 'design_tasks', 'queries', 'content_posts'].includes(table)) r.updated_at = nowISO()
   if (table === 'invoices' || table === 'quotations') totals(r)
+  if (table === 'content_posts' && old.results !== r.results) postResults(r)
   if (table === 'staff_pay') payCalc(r)
   if (table === 'expenses' && (r.supplier_id !== old.supplier_id || r.vendor !== old.vendor)) expensePayee(r)
   if (table === 'roles' && old.key === 'admin') { r.permissions = ['*']; r.key = 'admin' }
@@ -739,7 +748,13 @@ function seed() {
   ins('packages', { client_id: star.id, name: 'Social Media – Insurance', fee: 9000, posts_per_month: 12, stories_per_month: 4, platforms: ['Instagram', 'Facebook'], start_date: dm(-2, 1) })
   ins('packages', { client_id: sparrow.id, name: 'Social Media – Growth', fee: 14000, posts_per_month: 12, stories_per_month: 8, reels_per_month: 2, platforms: ['Instagram', 'Facebook'], start_date: dm(-2, 1) })
   ins('packages', { client_id: xmart.id, name: 'Social Media – Starter', fee: 8000, posts_per_month: 10, stories_per_month: 4, platforms: ['Instagram', 'Facebook'], start_date: dm(-2, 1) })
-  const SP = (c, k, d, title, o = {}) => ins('content_posts', { client_id: c.id, publish_date: dm(k, d), title, post_type: 'Post', platforms: ['Instagram', 'Facebook'], status: 'published', published_url: 'https://instagram.com/p/demo', assignee_id: d % 2 ? d2 : d1, ...o })
+  let seedN = 7; const rnd = (lo, hi) => { seedN = (seedN * 9301 + 49297) % 233280; return Math.round(lo + (seedN / 233280) * (hi - lo)) }
+  const res = (scale) => [
+    { platform: 'Instagram', url: 'https://www.instagram.com/p/demo' + rnd(1000, 9999), reach: rnd(80, 900) * scale, views: rnd(150, 1600) * scale, likes: rnd(6, 70) * scale, comments: rnd(0, 9), shares: rnd(0, 12), saves: rnd(0, 15) },
+    { platform: 'Facebook', url: 'https://www.facebook.com/demo/posts/' + rnd(1000, 9999), reach: rnd(20, 400) * scale, views: rnd(40, 600) * scale, likes: rnd(1, 25), comments: rnd(0, 4), shares: rnd(0, 6), saves: null }]
+  const SP = (c, k, d, title, o = {}) => { const st = o.status || 'published'
+    return ins('content_posts', { client_id: c.id, publish_date: dm(k, d), title, post_type: 'Post', platforms: ['Instagram', 'Facebook'], status: st, assignee_id: d % 2 ? d2 : d1,
+      results: st === 'published' ? (k === 0 && d > 24 ? res(1).map((x) => ({ platform: x.platform, url: x.url })) : res(k === 0 && d > 6 && d < 20 ? 3 : 1)) : [], ...o, published_url: undefined }) }
   for (const [d, t, o] of [[1, 'Malayalam health tip – monsoon fevers'], [2, 'Malayalam health tip – sugar check'], [4, 'Why health insurance early?'], [5, "Teachers' Day"], [8, 'Malayalam health related – cashless claims'], [11, 'Claim settlement story'], [14, 'Bill related – hospital bill shock'], [23, 'Health insurance highlight', { post_type: 'Story' }], [26, 'Health importance – Malayalam content'], [29, 'World Heart Day']]) SP(star, -1, d, t, o)
   for (const [d, t, o] of [[1, 'Malayalam health tip – BP'], [3, 'Family floater explained'], [6, 'Senior citizen plan'], [8, 'Malayalam health tip – dengue'], [10, 'World Mental Health Day'], [13, 'Tax saving with health insurance', { post_type: 'Story' }], [15, 'Claim helpline story', { post_type: 'Story' }], [17, 'Customer review'], [20, 'Diwali greeting', { status: 'approved', published_url: null }], [22, 'Top-up plans', { status: 'client_approval', published_url: null }], [24, 'Malayalam health tip – heart', { status: 'internal_review', published_url: null }], [27, 'Renewal reminder', { status: 'in_design', published_url: null }], [29, 'Hospital network list', { status: 'idea', published_url: null }]]) SP(star, 0, d, t, o)
   for (const [d, t, o] of [[2, 'New arrivals – kids wear'], [3, 'Story: new stock', { post_type: 'Story' }], [5, 'Onam collection'], [6, 'Reel: store walkthrough', { post_type: 'Reel' }], [9, 'Weekend offer'], [10, 'Story: poll', { post_type: 'Story' }], [12, 'Festive gift ideas'], [16, 'Customer pick'], [18, 'Story: offer', { post_type: 'Story' }], [20, 'Back to school'], [23, 'Store timings'], [26, 'Reel: try-on', { post_type: 'Reel' }], [28, 'Month-end sale']]) SP(sparrow, -1, d, t, o)

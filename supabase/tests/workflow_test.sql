@@ -227,4 +227,10 @@ select pg_temp.as_user('00000000-0000-0000-0000-00000000000d');
 do $$ begin begin insert into social_kpis(client_id, month, week_no) select id, current_date, 2 from clients limit 1; raise exception 'FAIL finance wrote kpi';
   exception when insufficient_privilege then raise notice 'ok'; end; end $$;
 reset role;
+-- ===== per-platform post results roll up into the totals
+select pg_temp.as_user('00000000-0000-0000-0000-00000000000b');
+update content_posts set results = '[{"platform":"Instagram","url":"https://instagram.com/p/x","reach":300,"views":500,"likes":40,"comments":5,"shares":2,"saves":3},{"platform":"Facebook","url":"https://fb.com/x","reach":120,"likes":10}]'
+ where id = (select id from content_posts limit 1);
+select 'post results totals' t, published_url, reach, likes, comments from content_posts where jsonb_array_length(results) = 2;
+reset role;
 select 'ALL TESTS PASSED' as result;

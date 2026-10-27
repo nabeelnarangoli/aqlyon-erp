@@ -149,7 +149,7 @@ function PostModal({ post, readOnly, onClose, onSaved }) {
   const nav = useNavigate()
   const { confirm, toast } = useToast()
   const [f, set, setF] = useForm({ client_id: '', publish_date: todayISO(), publish_time: '', platforms: ['Instagram', 'Facebook'], post_type: 'Post', pillar: '', title: '', caption: '',
-    hashtags: '', cta: '', media_link: '', status: 'idea', published_url: '', reach: 0, likes: 0, comments: 0, shares: 0, saves: 0, design_task_id: null, client_note: '', assignee_id: '', ...post })
+    hashtags: '', cta: '', media_link: '', status: 'idea', published_url: '', reach: 0, likes: 0, comments: 0, shares: 0, saves: 0, design_task_id: null, client_note: '', assignee_id: '', results: [], ...post })
   const isNew = !f.id
   const [makeTask, setMakeTask] = useState(false)
   const [busy, run] = useAction()
@@ -159,6 +159,7 @@ function PostModal({ post, readOnly, onClose, onSaved }) {
     const p = { ...f }
     ;['id', 'created_at', 'updated_at', 'created_by', 'clients', 'design_tasks', 'client_decided_at'].forEach((k) => delete p[k])
     ;['reach', 'likes', 'comments', 'shares', 'saves'].forEach((k) => (p[k] = Number(p[k] || 0)))
+    p.results = cleanResults(p.results)
     p.publish_time = p.publish_time || null; p.design_task_id = p.design_task_id || null; p.assignee_id = p.assignee_id || null
     return p
   }
@@ -215,14 +216,9 @@ function PostModal({ post, readOnly, onClose, onSaved }) {
         )}
       </Card>
 
-      {!isNew && ['scheduled', 'published'].includes(f.status) && (
-        <Card className="mt" title="Performance">
-          <div className="form f3">
-            <Field label="Post URL" span={3}><Input value={f.published_url} onChange={set('published_url')} disabled={readOnly} /></Field>
-            {['reach', 'likes', 'comments', 'shares', 'saves'].map((k) => <Field key={k} label={k[0].toUpperCase() + k.slice(1)}><Input type="number" step="any" min="0" value={f[k]} onChange={set(k)} disabled={readOnly} /></Field>)}
-            <Field label="Engagement rate"><div className="input" style={{ display: 'flex', alignItems: 'center', background: 'var(--surface-2)' }}>{f.reach ? (((+f.likes + +f.comments + +f.shares + +f.saves) / f.reach) * 100).toFixed(2) + '%' : '—'}</div></Field>
-          </div>
-        </Card>
+      {!isNew && ['approved', 'scheduled', 'published'].includes(f.status) && (
+        <PostResults value={f.results} platforms={f.platforms || []} readOnly={readOnly} onChange={set('results')}
+          legacy={!(f.results || []).length && (f.published_url || +f.reach) ? f : null} />
       )}
 
       {makeTask && <TaskModal
@@ -240,3 +236,45 @@ function PostModal({ post, readOnly, onClose, onSaved }) {
   )
 }
 
+
+/* ---------------- per-platform post results (link + numbers for each platform it went out on) ---------------- */
+export const RESULT_FIELDS = [['reach', 'Reach'], ['views', 'Views'], ['likes', 'Likes'], ['comments', 'Comments'], ['shares', 'Shares'], ['saves', 'Saves']]
+export const engagement = (r) => { const reach = Number(r.reach) || Number(r.views) || 0; const e = ['likes', 'comments', 'shares', 'saves'].reduce((a, k) => a + (Number(r[k]) || 0), 0); return reach ? (e / reach) * 100 : null }
+const cleanResults = (rows) => (rows || []).map((r) => ({ platform: r.platform || 'Instagram', url: (r.url || '').trim() || null,
+  ...Object.fromEntries(RESULT_FIELDS.map(([k]) => [k, r[k] === '' || r[k] === null || r[k] === undefined ? null : Number(r[k])])) }))
+  .filter((r) => r.url || RESULT_FIELDS.some(([k]) => r[k]))
+
+function PostResults({ value, platforms, readOnly, onChange, legacy }) {
+  const start = () => {
+    if (value && value.length) return value
+    if (legacy) return [{ platform: platforms[0] || 'Instagram', url: legacy.published_url || '', reach: legacy.reach || '', likes: legacy.likes || '', comments: legacy.comments || '', shares: legacy.shares || '', saves: legacy.saves || '' }]
+    return (platforms.length ? platforms : ['Instagram']).map((p) => ({ platform: p, url: '' }))
+  }
+  const rows = value && value.length ? value : start()
+  const upd = (i, k, v) => onChange(rows.map((r, j) => (j === i ? { ...r, [k]: v } : r)))
+  const next = PLATFORMS.find((p) => !rows.some((r) => r.platform === p) && platforms.includes(p)) || PLATFORMS.find((p) => !rows.some((r) => r.platform === p)) || 'Other'
+  return (
+    <Card className="mt" title="Post links & performance" actions={!readOnly && <Button size="sm" variant="ghost" icon={Plus} onClick={() => onChange([...rows, { platform: next, url: '' }])}>Add platform</Button>}>
+      <p className="tiny faint" style={{ marginTop: -4 }}>One row for each platform this went out on. Paste the link when it's live; add the numbers from that platform's insights (any time later). These feed the client's monthly report.</p>
+      {rows.map((r, i) => {
+        const er = engagement(r)
+        return (
+          <div key={i} className="result-row">
+            <div className="row gap-s wrap">
+              <div style={{ width: 170 }}><Select placeholder={false} options={PLATFORMS} value={r.platform} onChange={(v) => upd(i, 'platform', v)} disabled={readOnly} /></div>
+              <div className="grow" style={{ minWidth: 220 }}><Input value={r.url || ''} onChange={(e) => upd(i, 'url', e.target.value)} placeholder={`${r.platform} post link`} disabled={readOnly} /></div>
+              {r.url && <a className="btn btn-ghost btn-sm" href={r.url} target="_blank" rel="noreferrer"><ExternalLink size={14} /></a>}
+              {!readOnly && <IconBtn icon={Trash2} size={14} title="Remove" onClick={() => onChange(rows.filter((_, j) => j !== i))} />}
+            </div>
+            <div className="result-nums">
+              {RESULT_FIELDS.map(([k, label]) => (
+                <label key={k}><span>{label}</span><Input type="number" min="0" step="any" value={r[k] ?? ''} onChange={(e) => upd(i, k, e.target.value)} disabled={readOnly} /></label>
+              ))}
+              <label><span>Engagement</span><div className="input" style={{ background: 'var(--surface-2)' }}>{er === null ? '—' : `${er.toFixed(1)}%`}</div></label>
+            </div>
+          </div>
+        )
+      })}
+    </Card>
+  )
+}

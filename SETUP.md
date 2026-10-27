@@ -130,7 +130,7 @@ Each person sees their own walk-in sales and "You collected today" (by method) f
 **Insights → Client social reports** shows every client for a month: posters / stories / reels / banners delivered against the package, work still in progress or waiting on the client, and reach, post views, new followers and interactions with the change from last month.
 
 Open a client for the monthly report (Print / PDF to send them):
-- **Content log by week** — straight from the Content Calendar (date, platform, type, topic, assigned, status, internal ✓, client ✓, post link). Plan posts in the calendar as before; set *Assigned to* and paste the *Post URL* when it goes live.
+- **Content log by week** — straight from the Content Calendar (date, platform, type, topic, assigned, status, internal ✓, client ✓, post link). Plan posts in the calendar as before; set *Assigned to*, and under *Post links & performance* add one row per platform it went out on (platform → link → reach, views, likes, comments, shares, saves). These rows make the report's *Post performance* table: per-post numbers, platform totals and the best post.
 - **Account performance** — one small grid per platform: type the week's numbers from Instagram / Meta insights (1.2k and 45% work). Charts and month totals update on save.
 
 Weeks follow the sheet: Week 1 = 1st–7th, Week 2 = 8th–14th, Week 3 = 15th–21st, Week 4 = 22nd–28th, Week 5 = 29th–end.

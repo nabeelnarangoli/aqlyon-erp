@@ -7,6 +7,7 @@ import { useAuth } from '../../lib/auth'
 import { useData } from '../../lib/hooks'
 import { DELIVERY_KINDS, kindOf, DONE_POST, KPI_FIELDS, KPI_PLATFORMS, POST_STATUSES } from '../../lib/constants'
 import { date } from '../../lib/format'
+import { RESULT_FIELDS, engagement } from '../tasks/Calendar'
 import { PageHeader, Button, Card, Badge, StatusBadge, Stat, Loading, Empty, Input, Progress, Tabs, useAction, cx } from '../../components/ui'
 
 /* ----------------------------- helpers ----------------------------- */
@@ -239,7 +240,7 @@ function ClientReport({ id, ym, setYm }) {
                           <td><StatusBadge list={POST_STATUSES} value={p.status} />{p.design_tasks?.status === 'revision' && <div><Badge tone="orange">Re-work</Badge></div>}</td>
                           <td className="center">{internal ? <Check size={15} color="var(--green-d)" /> : <span className="faint">·</span>}</td>
                           <td className="center">{client ? <Check size={15} color="var(--green-d)" /> : p.status === 'client_approval' ? <span className="tiny" style={{ color: 'var(--amber, #b45309)' }}>waiting</span> : <span className="faint">·</span>}</td>
-                          <td>{p.published_url ? <a href={p.published_url} target="_blank" rel="noreferrer" className="small">Open <ExternalLink size={11} /></a> : <span className="faint">—</span>}</td>
+                          <td><PostLinks p={p} /></td>
                         </tr>
                       )
                     })}
@@ -249,6 +250,8 @@ function ClientReport({ id, ym, setYm }) {
             </table></div>
           )}
         </Card>
+
+        <PostPerformance posts={posts} />
 
         {/* ---- KPIs ---- */}
         <Card className="mt" title="Account performance" actions={<div className="row gap-xs no-print">{platforms.map((p) => <Button key={p} size="sm" variant={platform === p ? 'primary' : 'ghost'} onClick={() => setPlatform(p)}>{p}</Button>)}</div>}>
@@ -353,4 +356,60 @@ function KpiCharts({ ym, from6, kpi, weeks }) {
 
 export function SocialReportLink({ clientId }) {
   return <Link className="btn btn-outline" to={`/social/${clientId}`}><BarChart3 size={15} />Social report</Link>
+}
+
+const SHORT = { Instagram: 'IG', Facebook: 'FB', YouTube: 'YT', LinkedIn: 'LI', WhatsApp: 'WA', 'X / Twitter': 'X', 'Google Business': 'GBP', Website: 'Web' }
+const resultsOf = (p) => (p.results || []).length ? p.results : p.published_url ? [{ platform: (p.platforms || [])[0] || 'Post', url: p.published_url, reach: p.reach, likes: p.likes, comments: p.comments, shares: p.shares, saves: p.saves }] : []
+function PostLinks({ p }) {
+  const rs = resultsOf(p).filter((r) => r.url)
+  if (!rs.length) return <span className="faint">—</span>
+  return <span>{rs.map((r, i) => <a key={i} className="plat-link" href={r.url} target="_blank" rel="noreferrer" title={r.platform}>{SHORT[r.platform] || r.platform} <ExternalLink size={10} /></a>)}</span>
+}
+
+// every posted item with its numbers on each platform, plus platform totals and the best post
+function PostPerformance({ posts }) {
+  const lines = posts.flatMap((p) => resultsOf(p).map((r) => ({ p, r })))
+  const measured = lines.filter(({ r }) => RESULT_FIELDS.some(([k]) => Number(r[k])))
+  if (!lines.length) return null
+  const plats = [...new Set(lines.map(({ r }) => r.platform))]
+  const tot = (rows, k) => rows.reduce((a, { r }) => a + (Number(r[k]) || 0), 0)
+  const best = [...measured].sort((a, b) => (Number(b.r.reach) || Number(b.r.views) || 0) - (Number(a.r.reach) || Number(a.r.views) || 0))[0]
+  return (
+    <Card className="mt" title={`Post performance · ${lines.filter(({ r }) => r.url).length} link${lines.filter(({ r }) => r.url).length === 1 ? '' : 's'}`} pad={false}>
+      <div className="stats card-body" style={{ gridTemplateColumns: `repeat(auto-fit, minmax(170px, 1fr))`, marginBottom: 0 }}>
+        {plats.map((pl) => {
+          const rows = lines.filter(({ r }) => r.platform === pl)
+          const er = engagement(Object.fromEntries(RESULT_FIELDS.map(([k]) => [k, tot(rows, k)])))
+          return (
+            <div key={pl} className="stat"><div className="grow">
+              <div className="stat-label">{pl} · {rows.length} post{rows.length === 1 ? '' : 's'}</div>
+              <div className="stat-value">{fmt(tot(rows, 'reach') || tot(rows, 'views'))}<span className="faint" style={{ fontSize: '0.5em' }}> {tot(rows, 'reach') ? 'reach' : 'views'}</span></div>
+              <div className="stat-sub">{fmt(tot(rows, 'likes'))} likes · {fmt(tot(rows, 'comments'))} comments · {fmt(tot(rows, 'shares'))} shares{er !== null ? ` · ${er.toFixed(1)}% eng.` : ''}</div>
+            </div></div>
+          )
+        })}
+        {best && <div className="stat"><div className="grow">
+          <div className="stat-label">Best post</div>
+          <div className="strong" style={{ marginTop: 4 }}>{best.p.title}</div>
+          <div className="stat-sub">{best.r.platform} · {fmt(Number(best.r.reach) || Number(best.r.views))} {Number(best.r.reach) ? 'reach' : 'views'} · {date(best.p.publish_date)}</div>
+        </div></div>}
+      </div>
+      <div className="table-wrap"><table className="table">
+        <thead><tr><th>Date</th><th>Post</th><th>Platform</th>{RESULT_FIELDS.map(([k, l]) => <th key={k} className="num">{l}</th>)}<th className="num">Eng.</th></tr></thead>
+        <tbody>{lines.map(({ p, r }, i) => {
+          const er = engagement(r)
+          return (
+            <tr key={i}>
+              <td className="nowrap">{date(p.publish_date)}</td>
+              <td><div className="cell-title">{p.title}</div><div className="cell-sub">{p.post_type === 'Post' ? 'Poster' : p.post_type}</div></td>
+              <td className="nowrap">{r.url ? <a href={r.url} target="_blank" rel="noreferrer">{r.platform} <ExternalLink size={11} /></a> : r.platform}</td>
+              {RESULT_FIELDS.map(([k]) => <td key={k} className="num">{r[k] === null || r[k] === undefined || r[k] === '' ? <span className="faint">—</span> : fmt(r[k])}</td>)}
+              <td className="num">{er === null ? <span className="faint">—</span> : `${er.toFixed(1)}%`}</td>
+            </tr>)
+        })}</tbody>
+        <tfoot><tr><td colSpan={3}>Total</td>{RESULT_FIELDS.map(([k]) => <td key={k} className="num">{fmt(tot(lines, k))}</td>)}<td className="num">{(() => { const e = engagement(Object.fromEntries(RESULT_FIELDS.map(([k]) => [k, tot(lines, k)]))); return e === null ? '—' : `${e.toFixed(1)}%` })()}</td></tr></tfoot>
+      </table></div>
+      {lines.length > measured.length && <p className="tiny faint card-body" style={{ paddingTop: 0 }}>{lines.length - measured.length} link{lines.length - measured.length === 1 ? '' : 's'} still without numbers — open the post in the content calendar to add them.</p>}
+    </Card>
+  )
 }

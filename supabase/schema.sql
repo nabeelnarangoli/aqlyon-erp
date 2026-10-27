@@ -1271,6 +1271,30 @@ grant execute on function public.walkin_collect(uuid, numeric, text, text) to au
 -- ---------------------------------------------------------------------
 alter table public.content_posts add column if not exists assignee_id uuid references public.profiles(id) on delete set null;
 
+-- per-platform results of a post: [{platform, url, reach, views, likes, comments, shares, saves}]
+alter table public.content_posts add column if not exists results jsonb not null default '[]';
+-- the single-value columns (published_url, reach, likes…) stay as totals so older reports keep working
+create or replace function public.post_results_sync() returns trigger language plpgsql as $$
+begin
+  if jsonb_typeof(new.results) <> 'array' then new.results := '[]'; end if;
+  if jsonb_array_length(new.results) > 0 then
+    select (select r->>'url' from jsonb_array_elements(new.results) r where nullif(r->>'url', '') is not null limit 1),
+           coalesce(sum((r->>'reach')::numeric), 0), coalesce(sum((r->>'likes')::numeric), 0), coalesce(sum((r->>'comments')::numeric), 0),
+           coalesce(sum((r->>'shares')::numeric), 0), coalesce(sum((r->>'saves')::numeric), 0)
+      into new.published_url, new.reach, new.likes, new.comments, new.shares, new.saves
+      from jsonb_array_elements(new.results) r;
+  end if;
+  return new;
+end $$;
+drop trigger if exists trg_post_results on public.content_posts;
+create trigger trg_post_results before insert or update of results on public.content_posts
+  for each row execute function public.post_results_sync();
+-- move existing single links into the new list (safe to re-run)
+update public.content_posts
+   set results = jsonb_build_array(jsonb_build_object('platform', coalesce(platforms[1], 'Instagram'), 'url', published_url,
+                 'reach', reach, 'likes', likes, 'comments', comments, 'shares', shares, 'saves', saves))
+ where results = '[]' and (nullif(published_url, '') is not null or coalesce(reach, 0) + coalesce(likes, 0) > 0);
+
 create table if not exists public.social_kpis (
   id               uuid primary key default gen_random_uuid(),
   client_id        uuid not null references public.clients(id) on delete cascade,
