@@ -223,7 +223,9 @@ select pg_temp.as_user('00000000-0000-0000-0000-00000000000b');
 insert into social_kpis(client_id, platform, month, week_no, reach, new_followers, post_views, interactions, followers_pct)
   select id, 'Instagram', date_trunc('month', current_date)::date, 1, 380, 1, 1200, 196, 70 from clients where customer_type='regular' limit 1;
 insert into social_kpis(client_id, platform, month, week_no, reach) select client_id, platform, month, 1, 400 from social_kpis
-  on conflict (client_id, platform, month, week_no) do update set reach = excluded.reach;
+  on conflict (client_id, platform, period_start) do update set reach = excluded.reach;
+insert into social_kpis(client_id, platform, period_start, period_end, reach, extra) select client_id, 'YouTube', date '2026-09-23', date '2026-09-29', 90, '{"Subscribers": 4}' from social_kpis limit 1;
+select 'custom period' t, month, period_start, period_end, extra from social_kpis where platform = 'YouTube';
 select 'kpi upsert' t, count(*), max(reach) from social_kpis;
 reset role;
 select pg_temp.as_user('00000000-0000-0000-0000-00000000000d');

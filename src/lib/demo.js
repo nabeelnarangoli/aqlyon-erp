@@ -4,7 +4,7 @@ import { QUOTE_TERMS, PROPOSAL_INTRO, CLIENT_RESPONSIBILITIES, PROPOSAL_EXCLUSIO
 // database triggers/RPCs from supabase/schema.sql, on sample data kept in localStorage.
 // Only used when the app is built with VITE_DEMO=1.
 
-const KEY = 'aqlyon-erp-demo-v13'
+const KEY = 'aqlyon-erp-demo-v14'
 const SKEY = 'aqlyon-erp-demo-session'
 const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : 'id-' + Math.random().toString(36).slice(2) + Date.now().toString(36))
 const nowISO = () => new Date().toISOString()
@@ -173,8 +173,16 @@ function postResults(r) {
   const sum = (k) => r.results.reduce((a, x) => a + (Number(x[k]) || 0), 0)
   Object.assign(r, { published_url: r.results.find((x) => x.url)?.url || null, reach: sum('reach'), likes: sum('likes'), comments: sum('comments'), shares: sum('shares'), saves: sum('saves') })
 }
+// mirrors kpi_fill(): every KPI row has a From–To period and the month it starts in
+function kpiFill(r) {
+  const add = (iso, n) => { const d = new Date(iso + 'T00:00:00'); d.setDate(d.getDate() + n); return iso && iso.length === 10 ? `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` : null }
+  if (!r.period_start) r.period_start = add(r.month, ((r.week_no || 1) - 1) * 7)
+  if (!r.period_end || r.period_end < r.period_start) r.period_end = add(r.period_start, 6)
+  r.month = r.period_start.slice(0, 8) + '01'; r.extra ||= {}
+}
 function beforeInsert(table, r) {
   const st = settings()
+  if (table === 'social_kpis') kpiFill(r)
   if (table === 'content_posts') postResults(r)
   if (table === 'invoices') { if (!r.number) r.number = `${st.invoice_prefix}-${String(r.issue_date).slice(0, 4)}-${String(seq('invoice')).padStart(4, '0')}`; totals(r) }
   if (table === 'quotations') { if (!r.number) r.number = `${st.quote_prefix}-${String(r.issue_date).slice(0, 4)}-${String(seq('quote')).padStart(4, '0')}`; totals(r) }
@@ -236,6 +244,7 @@ function afterUpdate(table, old, r) {
   if (['leads', 'clients', 'design_tasks', 'queries', 'content_posts'].includes(table)) r.updated_at = nowISO()
   if (table === 'invoices' || table === 'quotations') totals(r)
   if (table === 'content_posts' && old.results !== r.results) postResults(r)
+  if (table === 'social_kpis') kpiFill(r)
   if (table === 'content_posts' && old.status !== r.status) postReview(r, old)
   if (table === 'staff_pay') payCalc(r)
   if (table === 'expenses' && (r.supplier_id !== old.supplier_id || r.vendor !== old.vendor)) expensePayee(r)
@@ -397,7 +406,7 @@ class Query {
         const out = []
         for (const v of list) {
           if (this.op === 'upsert' && v.id) { const ex = T(t).find((r) => r.id === v.id); if (ex) { Object.assign(ex, v); out.push(ex); continue } }
-          if (this.op === 'upsert' && t === 'social_kpis') { const ex = T(t).find((r) => r.client_id === v.client_id && r.platform === v.platform && r.month === v.month && r.week_no === v.week_no); if (ex) { Object.assign(ex, v, { updated_at: nowISO() }); out.push(ex); continue } }
+          if (this.op === 'upsert' && t === 'social_kpis') { const ex = T(t).find((r) => r.client_id === v.client_id && r.platform === v.platform && r.period_start === v.period_start); if (ex) { Object.assign(ex, v, { updated_at: nowISO() }); kpiFill(ex); out.push(ex); continue } }
           if (this.op === 'upsert' && t === 'staff_pay') { const ex = T(t).find((r) => r.user_id === v.user_id); if (ex) { Object.assign(ex, v); payCalc(ex); out.push(ex); continue } }
           const r = { ...(DEFAULTS[t]?.() || {}), ...Object.fromEntries(Object.entries(v).filter(([, x]) => x !== undefined)) }
           r.id ||= uuid(); r.created_at ||= nowISO()

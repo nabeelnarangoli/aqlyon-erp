@@ -1347,6 +1347,26 @@ create table if not exists public.social_kpis (
   unique (client_id, platform, month, week_no)
 );
 create index if not exists idx_kpi_client_month on public.social_kpis(client_id, month);
+-- KPIs are entered for any date period (e.g. 23–29 Sep), not only fixed weeks; extra = custom metrics {"Saves": 12, ...}
+alter table public.social_kpis add column if not exists period_start date;
+alter table public.social_kpis add column if not exists period_end date;
+alter table public.social_kpis add column if not exists extra jsonb not null default '{}';
+alter table public.social_kpis alter column week_no drop not null;
+update public.social_kpis set period_start = month + (week_no - 1) * 7,
+  period_end = least(month + week_no * 7 - 1, (date_trunc('month', month) + interval '1 month - 1 day')::date)
+ where period_start is null and week_no is not null;
+alter table public.social_kpis drop constraint if exists social_kpis_client_id_platform_month_week_no_key;
+create unique index if not exists uq_kpi_period on public.social_kpis(client_id, platform, period_start);
+create or replace function public.kpi_fill() returns trigger language plpgsql as $$
+begin
+  if new.period_start is null then new.period_start := new.month + (coalesce(new.week_no, 1) - 1) * 7; end if;
+  if new.period_end is null or new.period_end < new.period_start then new.period_end := new.period_start + 6; end if;
+  new.month := date_trunc('month', new.period_start)::date;
+  new.updated_at := now();
+  return new;
+end $$;
+drop trigger if exists trg_kpi_fill on public.social_kpis;
+create trigger trg_kpi_fill before insert or update on public.social_kpis for each row execute function public.kpi_fill();
 
 -- ---------------------------------------------------------------------
 -- 10f. APPROVAL & MENTION NOTIFICATIONS

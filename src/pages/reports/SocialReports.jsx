@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
-import { ArrowLeft, Printer, Download, Save, CalendarDays, TrendingUp, TrendingDown, Minus, ExternalLink, Check, BarChart3 } from 'lucide-react'
+import { ArrowLeft, Printer, Download, Save, CalendarDays, TrendingUp, TrendingDown, Minus, ExternalLink, Check, BarChart3, Plus, Trash2 } from 'lucide-react'
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, Legend, LineChart, Line } from 'recharts'
 import { supabase, q } from '../../lib/supabase'
 import { downloadPdf } from '../../lib/pdf'
@@ -9,7 +9,7 @@ import { useData } from '../../lib/hooks'
 import { DELIVERY_KINDS, kindOf, DONE_POST, KPI_FIELDS, KPI_PLATFORMS, POST_STATUSES } from '../../lib/constants'
 import { date } from '../../lib/format'
 import { RESULT_FIELDS, engagement } from '../tasks/Calendar'
-import { PageHeader, Button, Card, Badge, StatusBadge, Stat, Loading, Empty, Input, Progress, Tabs, useAction, cx } from '../../components/ui'
+import { PageHeader, Button, Card, Badge, StatusBadge, Stat, Loading, Empty, Input, Progress, Tabs, IconBtn, useAction, cx } from '../../components/ui'
 
 /* ----------------------------- helpers ----------------------------- */
 const pad = (n) => String(n).padStart(2, '0')
@@ -158,13 +158,15 @@ function ClientReport({ id, ym, setYm }) {
 
   const [platform, setPlatform] = useState('Instagram')
   const [pdfBusy, setPdfBusy] = useState(false)
+  const [addedPlatforms, setAddedPlatforms] = useState([])
+  const [addingPlatform, setAddingPlatform] = useState(null)
   const platforms = useMemo(() => {
-    if (!data) return ['Instagram', 'Facebook']
-    const fromPkg = data.pk.flatMap((p) => p.platforms || []).filter((p) => KPI_PLATFORMS.includes(p))
-    const fromKpi = data.kpi.map((k) => k.platform)
-    const list = [...new Set([...fromPkg, ...fromKpi, 'Instagram', 'Facebook'])]
-    return KPI_PLATFORMS.filter((p) => list.includes(p))
-  }, [data])
+    const fromPkg = (data?.pk || []).flatMap((p) => p.platforms || []).filter((p) => KPI_PLATFORMS.includes(p))
+    const fromKpi = (data?.kpi || []).map((k) => k.platform)
+    const list = [...new Set([...fromPkg, ...fromKpi, ...addedPlatforms, 'Instagram', 'Facebook'])]
+    return [...KPI_PLATFORMS.filter((p) => list.includes(p)), ...list.filter((p) => !KPI_PLATFORMS.includes(p))]
+  }, [data, addedPlatforms])
+  const addPlatform = () => { const v = (addingPlatform || '').trim(); if (v) { setAddedPlatforms((x) => [...new Set([...x, v])]); setPlatform(v) } setAddingPlatform(null) }
 
   if (loading || !data) return <Loading />
   const c = data.client
@@ -257,11 +259,20 @@ function ClientReport({ id, ym, setYm }) {
         <PostPerformance posts={posts} />
 
         {/* ---- KPIs ---- */}
-        <Card className="mt" title="Account performance" actions={<div className="row gap-xs no-print">{platforms.map((p) => <Button key={p} size="sm" variant={platform === p ? 'primary' : 'ghost'} onClick={() => setPlatform(p)}>{p}</Button>)}</div>}>
+        <Card className="mt" title="Account performance" actions={<div className="row gap-xs no-print wrap">{platforms.map((p) => <Button key={p} size="sm" variant={platform === p ? 'primary' : 'ghost'} onClick={() => setPlatform(p)}>{p}</Button>)}
+            {canEdit && (addingPlatform === null
+              ? <IconBtn icon={Plus} title="Add another platform / channel" onClick={() => setAddingPlatform('')} />
+              : <span className="row gap-xs">
+                  <input className="input" list="kpi-platforms" autoFocus style={{ width: 160, padding: '5px 8px' }} value={addingPlatform} placeholder="e.g. YouTube, Website" onChange={(e) => setAddingPlatform(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addPlatform() } if (e.key === 'Escape') setAddingPlatform(null) }} />
+                  <datalist id="kpi-platforms">{['YouTube', 'LinkedIn', 'Google Business', 'WhatsApp Channel', 'X / Twitter', 'Threads', 'Pinterest', 'Website', 'Snapchat'].filter((x) => !platforms.includes(x)).map((x) => <option key={x} value={x} />)}</datalist>
+                  <Button size="sm" onClick={addPlatform} disabled={!(addingPlatform || '').trim()}>Add</Button>
+                </span>)}
+          </div>}>
           <KpiSummary rows={kNow.filter((k) => k.platform === platform)} prev={kPrev.filter((k) => k.platform === platform)} prevLabel={monthLabel(prevYm, true)} />
-          <KpiGrid key={platform + ym} client={id} ym={ym} platform={platform} weeks={weeks} rows={kNow.filter((k) => k.platform === platform)}
+          <KpiGrid key={platform + ym} client={id} ym={ym} platform={platform} rows={kNow.filter((k) => k.platform === platform)}
             posts={posts} canEdit={canEdit} onSaved={reload} />
-          <KpiCharts ym={ym} from6={from6} kpi={data.kpi.filter((k) => k.platform === platform)} weeks={weeks} />
+          <KpiCharts ym={ym} from6={from6} kpi={data.kpi.filter((k) => k.platform === platform)} />
         </Card>
         <div className="center tiny print-only" style={{ marginTop: 24, color: '#999' }}>Prepared by {settings?.company_name || 'Aqlyon Brand Management'}</div>
       </div>
@@ -289,48 +300,105 @@ function KpiSummary({ rows, prev, prevLabel }) {
   )
 }
 
-// quick weekly entry: one small grid per month & platform, typed the same way as the sheet ("1.2k" works)
-function KpiGrid({ client, ym, platform, weeks, rows, posts, canEdit, onSaved }) {
-  const init = () => Object.fromEntries(weeks.map((w) => {
-    const r = rows.find((x) => x.week_no === w) || {}
-    return [w, Object.fromEntries(KPI_FIELDS.map((f) => [f.id, r[f.id] ?? '']))]
-  }))
+// KPI entry: one row per period (any From–To dates, like the marketer's sheet), standard metrics + custom ones
+const addDaysISO = (iso, n) => { const d = new Date(iso + 'T00:00:00'); d.setDate(d.getDate() + n); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}` }
+const shortRange = (a, b) => { const f = (x) => new Date(x + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }); return `${f(a)} – ${f(b)}` }
+const periodOf = (k) => ({ start: k.period_start || addDaysISO(k.month, ((k.week_no || 1) - 1) * 7), end: k.period_end || addDaysISO(k.month, (k.week_no || 1) * 7 - 1) })
+
+function KpiGrid({ client, ym, platform, rows, posts, canEdit, onSaved }) {
+  const toRow = (r) => ({ id: r.id, start: periodOf(r).start, end: periodOf(r).end,
+    v: Object.fromEntries(KPI_FIELDS.map((f) => [f.id, r[f.id] ?? ''])), x: { ...(r.extra || {}) } })
+  const init = () => {
+    const list = [...rows].map(toRow).sort((a, b) => a.start.localeCompare(b.start))
+    return list.length ? list : [{ id: null, start: first(ym), end: addDaysISO(first(ym), 6), v: {}, x: {} }]
+  }
   const [g, setG] = useState(init)
+  const [extraCols, setExtraCols] = useState(() => [...new Set(rows.flatMap((r) => Object.keys(r.extra || {})))])
+  const [newCol, setNewCol] = useState(null)
   const [dirty, setDirty] = useState(false)
+  const [removed, setRemoved] = useState([])
   const [busy, run] = useAction()
-  useEffect(() => { setG(init()); setDirty(false) }, [rows]) // eslint-disable-line react-hooks/exhaustive-deps
-  const shared = (w) => posts.filter((p) => weekOf(p.publish_date) === w && DONE_POST.includes(p.status) && (p.platforms || []).includes(platform)).length
-  const setCell = (w, f, v) => { setG((s) => ({ ...s, [w]: { ...s[w], [f]: v } })); setDirty(true) }
-  const bad = weeks.flatMap((w) => KPI_FIELDS.filter((f) => Number.isNaN(parseNum(g[w][f.id])) || (f.pct && parseNum(g[w][f.id]) > 100)).map((f) => `Week ${w} ${f.label}`))
+  useEffect(() => { setG(init()); setDirty(false); setRemoved([]); setExtraCols((c) => [...new Set([...c, ...rows.flatMap((r) => Object.keys(r.extra || {}))])]) }, [rows]) // eslint-disable-line react-hooks/exhaustive-deps
+  const upd = (i, fn) => { setG((s) => s.map((r, j) => (j === i ? fn({ ...r, v: { ...r.v }, x: { ...r.x } }) : r))); setDirty(true) }
+  const addRow = () => {
+    const last = g[g.length - 1]
+    const start = last ? addDaysISO(last.end, 1) : first(ym)
+    setG((s) => [...s, { id: null, start, end: addDaysISO(start, 6), v: {}, x: {} }]); setDirty(true)
+  }
+  const delRow = (i) => { const r = g[i]; if (r.id) setRemoved((x) => [...x, r.id]); setG((s) => s.filter((_, j) => j !== i)); setDirty(true) }
+  const shared = (r) => posts.filter((p) => p.publish_date >= r.start && p.publish_date <= r.end && DONE_POST.includes(p.status) && (p.platforms || []).includes(platform)).length
+  const bad = g.flatMap((r, i) => [
+    ...(r.end < r.start ? [`row ${i + 1} dates`] : []),
+    ...KPI_FIELDS.filter((f) => Number.isNaN(parseNum(r.v[f.id])) || (f.pct && parseNum(r.v[f.id]) > 100)).map((f) => `${shortRange(r.start, r.end)} ${f.label}`),
+    ...extraCols.filter((c) => Number.isNaN(parseNum(r.x[c]))).map((c) => `${shortRange(r.start, r.end)} ${c}`)
+  ])
+  const dupStart = g.find((r, i) => g.findIndex((o) => o.start === r.start) !== i)
   const save = () => run(async () => {
     if (bad.length) throw new Error(`Check: ${bad.slice(0, 3).join(', ')}`)
-    const up = weeks.map((w) => ({ client_id: client, platform, month: first(ym), week_no: w, ...Object.fromEntries(KPI_FIELDS.map((f) => [f.id, parseNum(g[w][f.id])])) }))
-      .filter((r) => KPI_FIELDS.some((f) => r[f.id] !== null) || rows.some((x) => x.week_no === r.week_no))
-    if (up.length) await q(supabase.from('social_kpis').upsert(up, { onConflict: 'client_id,platform,month,week_no' }))
+    if (dupStart) throw new Error(`Two rows start on ${shortRange(dupStart.start, dupStart.end)} — change one`)
+    if (removed.length) await q(supabase.from('social_kpis').delete().in('id', removed))
+    for (const r of g) {
+      const extra = Object.fromEntries(extraCols.map((c) => [c, parseNum(r.x[c])]).filter(([, v]) => v !== null))
+      const p = { client_id: client, platform, period_start: r.start, period_end: r.end, month: r.start.slice(0, 8) + '01', week_no: null, extra,
+        ...Object.fromEntries(KPI_FIELDS.map((f) => [f.id, parseNum(r.v[f.id])])) }
+      const empty = KPI_FIELDS.every((f) => p[f.id] === null) && !Object.keys(extra).length
+      if (r.id) await q(empty ? supabase.from('social_kpis').delete().eq('id', r.id) : supabase.from('social_kpis').update(p).eq('id', r.id))
+      else if (!empty) await q(supabase.from('social_kpis').upsert(p, { onConflict: 'client_id,platform,period_start' }))
+    }
     setDirty(false); onSaved()
-  }, `${platform} KPIs saved`)
-  const colTotal = (f) => { const vals = weeks.map((w) => parseNum(g[w][f.id])).filter((v) => v !== null && !Number.isNaN(v)); if (!vals.length) return '—'; const t = vals.reduce((a, v) => a + v, 0); return f.pct ? `${Math.round(t / vals.length)}%` : fmt(t) }
+  }, `${platform} numbers saved`)
+  const colTotal = (get, pct) => { const vals = g.map(get).map(parseNum).filter((v) => v !== null && !Number.isNaN(v)); if (!vals.length) return '—'; const t = vals.reduce((a, v) => a + v, 0); return pct ? `${Math.round(t / vals.length)}%` : fmt(t) }
+  const cell = (val, onCh, ph) => canEdit
+    ? <input className={cx('input right', Number.isNaN(parseNum(val)) && 'invalid')} style={{ width: 80, padding: '6px 8px' }} value={val ?? ''} placeholder={ph || ''} inputMode="decimal" onChange={(e) => onCh(e.target.value)} />
+    : fmt(val)
   return (
     <>
       <div className="table-wrap kpi-grid"><table className="table">
-        <thead><tr><th>{platform}</th>{KPI_FIELDS.map((f) => <th key={f.id} className="num">{f.label}</th>)}<th className="num">Non-followers %</th></tr></thead>
-        <tbody>{weeks.map((w) => (
-          <tr key={w}>
-            <td className="nowrap"><b>Week {w}</b><div className="tiny faint">{weekRange(ym, w)}</div></td>
+        <thead><tr>
+          <th>{platform} · period</th>
+          {KPI_FIELDS.map((f) => <th key={f.id} className="num">{f.label}</th>)}
+          <th className="num">Non-followers %</th>
+          {extraCols.map((c) => <th key={c} className="num">{c}</th>)}
+          {canEdit && <th className="no-print">{newCol === null
+            ? <button type="button" className="btn btn-ghost btn-sm" onClick={() => setNewCol('')}><Plus size={13} />Add metric</button>
+            : <span className="row gap-xs"><input className="input" autoFocus style={{ width: 120, padding: '5px 8px' }} value={newCol} placeholder="e.g. Saves" onChange={(e) => setNewCol(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter' && newCol.trim()) { e.preventDefault(); setExtraCols((c) => [...new Set([...c, newCol.trim()])]); setNewCol(null); setDirty(true) } if (e.key === 'Escape') setNewCol(null) }} />
+              <button type="button" className="btn btn-primary btn-sm" disabled={!newCol.trim()} onClick={() => { setExtraCols((c) => [...new Set([...c, newCol.trim()])]); setNewCol(null); setDirty(true) }}>Add</button></span>}
+          </th>}
+        </tr></thead>
+        <tbody>{g.map((r, i) => (
+          <tr key={r.id || 'n' + i}>
+            <td className="nowrap">
+              {canEdit ? (
+                <div className="row gap-xs">
+                  <input type="date" className="input" style={{ width: 138, padding: '5px 6px' }} value={r.start} onChange={(e) => e.target.value && upd(i, (x) => ({ ...x, start: e.target.value, end: x.end < e.target.value ? addDaysISO(e.target.value, 6) : x.end }))} />
+                  <span className="faint">–</span>
+                  <input type="date" className={cx('input', r.end < r.start && 'invalid')} style={{ width: 138, padding: '5px 6px' }} value={r.end} min={r.start} onChange={(e) => e.target.value && upd(i, (x) => ({ ...x, end: e.target.value }))} />
+                </div>
+              ) : <b>{shortRange(r.start, r.end)}</b>}
+            </td>
             {KPI_FIELDS.map((f) => (
-              <td key={f.id} className="num">
-                {canEdit ? <input className={cx('input right', Number.isNaN(parseNum(g[w][f.id])) && 'invalid')} style={{ width: 84, padding: '6px 8px' }} value={g[w][f.id]}
-                  placeholder={f.id === 'content_shared' && shared(w) ? String(shared(w)) : ''} inputMode="decimal" onChange={(e) => setCell(w, f.id, e.target.value)} />
-                  : (f.pct && g[w][f.id] !== '' ? `${g[w][f.id]}%` : fmt(g[w][f.id]))}
-              </td>
+              <td key={f.id} className="num">{f.pct && !canEdit ? (r.v[f.id] !== '' && r.v[f.id] != null ? `${r.v[f.id]}%` : '—')
+                : cell(r.v[f.id], (val) => upd(i, (x) => { x.v[f.id] = val; return x }), f.id === 'content_shared' && shared(r) ? String(shared(r)) : '')}</td>
             ))}
-            <td className="num faint">{parseNum(g[w].followers_pct) !== null && !Number.isNaN(parseNum(g[w].followers_pct)) ? `${Math.round(100 - parseNum(g[w].followers_pct))}%` : '—'}</td>
+            <td className="num faint">{parseNum(r.v.followers_pct) !== null && !Number.isNaN(parseNum(r.v.followers_pct)) ? `${Math.round(100 - parseNum(r.v.followers_pct))}%` : '—'}</td>
+            {extraCols.map((c) => <td key={c} className="num">{cell(r.x[c], (val) => upd(i, (x) => { x.x[c] = val; return x }))}</td>)}
+            {canEdit && <td className="no-print"><IconBtn icon={Trash2} size={14} title="Remove this period" onClick={() => delRow(i)} /></td>}
           </tr>))}</tbody>
-        <tfoot><tr><td>Month</td>{KPI_FIELDS.map((f) => <td key={f.id} className="num">{colTotal(f)}</td>)}<td /></tr></tfoot>
+        <tfoot><tr>
+          <td>Total</td>
+          {KPI_FIELDS.map((f) => <td key={f.id} className="num">{colTotal((r) => r.v[f.id], f.pct)}</td>)}
+          <td />
+          {extraCols.map((c) => <td key={c} className="num">{colTotal((r) => r.x[c])}</td>)}
+          {canEdit && <td />}
+        </tr></tfoot>
       </table></div>
       {canEdit && (
         <div className="row between wrap gap-s mt no-print">
-          <span className="tiny faint">Copy the week's numbers from Instagram / Meta insights. You can type 1.2k or 45%. Grey hints in “Content shared” are posts marked approved/posted that week.</span>
+          <div className="row gap-s wrap">
+            <Button variant="outline" size="sm" icon={Plus} onClick={addRow}>Add period</Button>
+            <span className="tiny faint">Pick the From–To dates you're reporting (any length), then copy the numbers from Instagram / Meta insights. 1.2k and 45% work. Grey hints in “Content shared” are posts approved/posted in that period.</span>
+          </div>
           <Button icon={Save} loading={busy} disabled={!dirty} onClick={save}>Save {platform} numbers</Button>
         </div>
       )}
@@ -338,20 +406,21 @@ function KpiGrid({ client, ym, platform, weeks, rows, posts, canEdit, onSaved })
   )
 }
 
-function KpiCharts({ ym, from6, kpi, weeks }) {
-  const weekly = weeks.map((w) => { const r = kpi.find((k) => k.month === first(ym) && k.week_no === w) || {}; return { w: `W${w}`, Reach: r.reach || 0, 'Post views': r.post_views || 0, Interactions: r.interactions || 0 } })
+function KpiCharts({ ym, from6, kpi }) {
+  const weekly = kpi.filter((k) => k.month === first(ym)).map((k) => ({ ...k, ...periodOf(k) })).sort((a, b) => a.start.localeCompare(b.start))
+    .map((k) => ({ w: shortRange(k.start, k.end), Reach: k.reach || 0, 'Post views': k.post_views || 0, Interactions: k.interactions || 0 }))
   const months = Array.from({ length: 6 }, (_, i) => shiftMonth(from6, i))
   const trend = months.map((m) => { const rs = kpi.filter((k) => k.month === first(m)); return rs.length ? { m: monthLabel(m, true), Reach: sumF(rs, 'reach'), 'New followers': sumF(rs, 'new_followers'), Interactions: sumF(rs, 'interactions') } : { m: monthLabel(m, true) } })
-  if (!kpi.length) return <p className="small faint mt">Charts appear once weekly numbers are saved.</p>
+  if (!kpi.length) return <p className="small faint mt">Charts appear once numbers are saved.</p>
   return (
     <div className="grid g2 mt">
-      <div><div className="small strong mb">This month by week</div><div style={{ height: 220 }}><ResponsiveContainer>
-        <BarChart data={weekly}><CartesianGrid strokeDasharray="3 3" vertical={false} /><XAxis dataKey="w" fontSize={12} /><YAxis fontSize={11} width={40} /><Tooltip /><Legend wrapperStyle={{ fontSize: 12 }} />
+      <div><div className="small strong mb">This month by period</div><div style={{ height: 220 }}><ResponsiveContainer>
+        <BarChart data={weekly}><CartesianGrid strokeDasharray="3 3" vertical={false} /><XAxis dataKey="w" fontSize={11} /><YAxis fontSize={11} width={40} /><Tooltip /><Legend wrapperStyle={{ fontSize: 12 }} />
           <Bar dataKey="Reach" fill="#1f9d63" radius={[4, 4, 0, 0]} /><Bar dataKey="Post views" fill="#7c5cff" radius={[4, 4, 0, 0]} /><Bar dataKey="Interactions" fill="#f59e0b" radius={[4, 4, 0, 0]} /></BarChart>
       </ResponsiveContainer></div></div>
       <div><div className="small strong mb">Last 6 months</div><div style={{ height: 220 }}><ResponsiveContainer>
         <LineChart data={trend}><CartesianGrid strokeDasharray="3 3" vertical={false} /><XAxis dataKey="m" fontSize={12} /><YAxis fontSize={11} width={40} /><Tooltip /><Legend wrapperStyle={{ fontSize: 12 }} />
-          <Line dataKey="Reach" stroke="#1f9d63" strokeWidth={2} dot connectNulls /><Line dataKey="New followers" stroke="#7c5cff" strokeWidth={2} dot /><Line dataKey="Interactions" stroke="#f59e0b" strokeWidth={2} dot /></LineChart>
+          <Line dataKey="Reach" stroke="#1f9d63" strokeWidth={2} dot connectNulls /><Line dataKey="New followers" stroke="#7c5cff" strokeWidth={2} dot connectNulls /><Line dataKey="Interactions" stroke="#f59e0b" strokeWidth={2} dot connectNulls /></LineChart>
       </ResponsiveContainer></div></div>
     </div>
   )

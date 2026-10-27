@@ -137,9 +137,9 @@ Each person sees their own walk-in sales and "You collected today" (by method) f
 
 Open a client for the monthly report (Print / PDF to send them):
 - **Content log by week** — straight from the Content Calendar (date, platform, type, topic, assigned, status, internal ✓, client ✓, post link). Plan posts in the calendar as before; set *Assigned to*, and under *Post links & performance* add one row per platform it went out on (platform → link → reach, views, likes, comments, shares, saves). These rows make the report's *Post performance* table: per-post numbers, platform totals and the best post.
-- **Account performance** — one small grid per platform: type the week's numbers from Instagram / Meta insights (1.2k and 45% work). Charts and month totals update on save.
+- **Account performance** — one grid per platform. Each row is a period with its own From–To dates (any length, e.g. 23–29 Sep); **Add period** adds the next one. Type the numbers from Instagram / Meta insights (1.2k and 45% work). **+ Add metric** adds your own column (Saves, Link clicks…); the **+** next to the platform tabs adds another channel (YouTube, Google Business, Website…).
 
-Weeks follow the sheet: Week 1 = 1st–7th, Week 2 = 8th–14th, Week 3 = 15th–21st, Week 4 = 22nd–28th, Week 5 = 29th–end.
+The content log groups posts by week of the month (1st–7th, 8th–14th …); KPI periods use whatever dates you enter.
 
 ## Approvals, mentions and pop-up notifications
 
