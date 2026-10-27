@@ -5,7 +5,7 @@ import { supabase, q } from '../../lib/supabase'
 import { useAuth } from '../../lib/auth'
 import { useData, useLocal } from '../../lib/hooks'
 import { PAYMENT_METHODS } from '../../lib/constants'
-import { money, money2, date, monthStart, monthEnd, downloadCSV } from '../../lib/format'
+import { money, money2, date, monthStart, monthEnd, downloadCSV, todayISO } from '../../lib/format'
 import { PageHeader, Button, Stat, Select, ClientSelect, MemberSelect, Input, Loading, Empty, Badge, Tabs } from '../../components/ui'
 import { PaymentModal } from './Invoices'
 import { WorkOrderView } from './Suppliers'
@@ -33,6 +33,24 @@ export default function Payments() {
     return { inc, out, exp, reimb }
   }, [from, to], { inc: [], out: [], exp: [], reimb: [] })
 
+  // the running position from the very first entry: opening balance before the period, and where things stand today
+  const pos = useData(async () => {
+    const [pi, po, pe, pr] = await Promise.all([
+      q(supabase.from('payments').select('amount,paid_on')),
+      q(supabase.from('supplier_payments').select('amount,paid_on,paid_by')),
+      q(supabase.from('expenses').select('amount,spent_on,paid_by')),
+      q(supabase.from('reimbursements').select('amount,paid_on'))
+    ])
+    const net = (upto, strict) => {
+      const ok = (d) => (strict ? d < upto : d <= upto)
+      const sum = (xs, k) => xs.filter((x) => ok(x[k])).reduce((a, x) => a + Number(x.amount), 0)
+      return { all: sum(pi, 'paid_on') - sum(po, 'paid_on') - sum(pe, 'spent_on'),
+        company: sum(pi, 'paid_on') - sum(po.filter((x) => !x.paid_by), 'paid_on') - sum(pe.filter((x) => !x.paid_by), 'spent_on') - sum(pr, 'paid_on') }
+    }
+    return { opening: net(from, true), today: net(todayISO(), false) }
+  }, [from, data], null)
+  const filtered = !!(method || client || by)
+  const opening = filtered ? 0 : pos.data?.opening.all || 0
   const custOf = (p) => (p.supplier_bills?.supplier_bill_allocations || []).map((a) => a.clients?.name).filter(Boolean).join(', ')
   const inc = useMemo(() => data.inc.filter((p) => (!method || p.method === method) && (!client || p.client_id === client) && (!by || (by === '__company' ? !p.collected_by : p.collected_by === by))), [data.inc, method, client, by])
   const out = useMemo(() => data.out.filter((p) => (!method || p.method === method) && (!client || (p.supplier_bills?.supplier_bill_allocations || []).some((a) => a.client_id === client))), [data.out, method, client])
@@ -46,7 +64,6 @@ export default function Payments() {
   const expCo = exp.filter((e) => !e.paid_by), expOwn = exp.filter((e) => e.paid_by)
   const tExp = sum(exp)
   const tReimb = sum(reimb)
-  const companyNet = tIn - sum(outCo) - sum(expCo) - tReimb   // what actually moved in the company's own account
   const own = [...outOwn, ...expOwn]
   const tOwn = own.reduce((a, x) => a + Number(x.amount), 0)
   const tOwnDue = own.filter((x) => !x.reimbursement_id).reduce((a, x) => a + Number(x.amount), 0)
@@ -59,9 +76,9 @@ export default function Payments() {
       ...exp.map((e) => ({ id: e.id, d: e.spent_on, dir: e.paid_by ? 'own' : 'out', own: e.paid_by && ownTag(e), kind: `Expense · ${e.category}`, who: e.vendor, whoLink: e.supplier_id && `/finance/suppliers/${e.supplier_id}`, forWho: e.clients?.name, method: e.method, note: e.description, amt: Number(e.amount) })),
       ...reimb.map((r) => ({ id: r.id, d: r.paid_on, dir: 'settle', kind: 'Repaid to founder / staff', who: member(r.person_id)?.full_name || 'Team member', whoLink: '/finance/expenses', method: r.method, note: r.reference || r.note, amt: Number(r.amount) }))
     ].sort((a, b) => a.d.localeCompare(b.d) || (a.dir === 'in' ? -1 : 1))
-    let bal = 0
+    let bal = opening
     return rows.map((r) => ({ ...r, bal: (bal += r.dir === 'in' ? r.amt : r.dir === 'settle' ? 0 : -r.amt) })).reverse()
-  }, [inc, out, exp, reimb, member])
+  }, [inc, out, exp, reimb, member, opening])
 
   const csv = () => downloadCSV(`cash-flow-${from}-to-${to}.csv`, [...ledger].reverse().map((r) => ({ date: r.d, type: r.kind, party: r.who, for_customer: r.forWho || '', reference: r.ref || '', method: r.method, money_in: r.dir === 'in' ? r.amt : '', money_out: r.dir === 'out' || r.dir === 'own' ? r.amt : '', paid_personally: r.dir === 'own' ? 'yes' : '', repayment_to_founder: r.dir === 'settle' ? r.amt : '', note: r.own || '', running_balance: r.bal })))
 
@@ -84,7 +101,9 @@ export default function Payments() {
         <Stat label="Paid to suppliers" value={money(tSup)} sub={outOwn.length ? `${money(sum(outCo))} company · ${money(sum(outOwn))} paid personally` : `${outCo.length} payments`} icon={ArrowUpRight} tone="orange" onClick={() => setTab('out')} />
         <Stat label="Other expenses" value={money(tExp)} sub={expOwn.length ? `${money(sum(expCo))} company · ${money(sum(expOwn))} paid personally` : `${exp.length} entries`} icon={Wallet} tone="red" />
         {own.length > 0 && <Stat label="Paid personally (founder / staff)" value={money(tOwn)} sub={tOwnDue ? `${money(tOwnDue)} still owed to them${tReimb ? ` · ${money(tReimb)} repaid` : ''}` : 'All repaid'} icon={Wallet} tone="amber" onClick={() => nav('/finance/expenses')} />}
-        <Stat label="Net cash flow" value={money(tIn - tSup - tExp)} sub={own.length || tReimb ? `In − all spending (incl. paid personally) · company account alone ${money(companyNet)}` : 'Money in − money out'} icon={Scale} tone={tIn - tSup - tExp >= 0 ? 'teal' : 'red'} onClick={() => setTab('ledger')} />
+        <Stat label="Cash position today" value={pos.data ? money(pos.data.today.all) : '…'}
+          sub={pos.data ? `This period ${money(tIn - tSup - tExp)} · company account alone ${money(pos.data.today.company)} today` : ''}
+          icon={Scale} tone={(pos.data?.today.all ?? 0) >= 0 ? 'teal' : 'red'} onClick={() => setTab('ledger')} />
       </div>
       <Tabs value={tab} onChange={setTab} tabs={[{ id: 'ledger', label: 'All movements', count: ledger.length }, { id: 'in', label: 'Received from customers', count: inc.length }, { id: 'out', label: 'Paid to suppliers', count: out.length }]} />
       {loading ? <Loading /> : tab === 'ledger' ? (
@@ -101,8 +120,9 @@ export default function Payments() {
                 <td className="num" style={{ color: 'var(--green-d)' }}>{r.dir === 'in' ? money2(r.amt) : ''}</td>
                 <td className="num" style={{ color: r.dir === 'settle' ? 'var(--text-3)' : 'var(--red)' }}>{r.dir === 'out' || r.dir === 'own' ? money2(r.amt) : r.dir === 'settle' ? <span title="Repayment to a founder / staff member — the spending was counted when it happened">({money2(r.amt)})</span> : ''}</td>
                 <td className="num strong">{money2(r.bal)}</td>
-              </tr>))}</tbody>
-            <tfoot><tr><td colSpan={5}>Total</td><td className="num">{money2(tIn)}</td><td className="num">{money2(tSup + tExp)}</td><td className="num">{money2(tIn - tSup - tExp)}</td></tr></tfoot>
+              </tr>))}
+              {!filtered && pos.data && <tr style={{ background: 'var(--surface-2)' }}><td className="nowrap">{date(from)}</td><td colSpan={6} className="strong">Opening balance (everything before this period)</td><td className="num strong">{money2(opening)}</td></tr>}</tbody>
+            <tfoot><tr><td colSpan={5}>Total</td><td className="num">{money2(tIn)}</td><td className="num">{money2(tSup + tExp)}</td><td className="num">{money2(opening + tIn - tSup - tExp)}</td></tr></tfoot>
           </table></div>
         )
       ) : tab === 'in' ? (
