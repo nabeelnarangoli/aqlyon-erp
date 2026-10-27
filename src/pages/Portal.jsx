@@ -38,7 +38,8 @@ export default function Portal() {
       <div className="hero" style={{ marginBottom: 16 }}>
         <div><p className="small" style={{ color: 'var(--green-2)', fontWeight: 700, letterSpacing: '.08em', textTransform: 'uppercase' }}>Content approvals</p>
           <h1>Hello {data.client.contact || data.client.name} 👋</h1>
-          <p>{pendingCount ? `${pendingCount} item${pendingCount > 1 ? 's' : ''} waiting for your approval.` : 'Everything is approved — thank you!'}</p></div>
+          <p>{pendingCount ? `${pendingCount} item${pendingCount > 1 ? 's' : ''} waiting for your approval.` : 'Everything is approved — thank you!'}</p>
+          {pendingCount > 0 && <p className="small" style={{ opacity: 0.85 }}>Please reply within {data.company?.approval_hours || 24} hours. If we don't hear back, we may go ahead with the scheduled post so your campaign stays on time.</p>}</div>
       </div>
       <div className="seg mb">
         <button className={tab === 'pending' ? 'on' : ''} onClick={() => setTab('pending')}>Waiting for you ({pendingCount})</button>

@@ -9,6 +9,8 @@ import { INVOICE_STATUS, QUOTE_STATUS } from '../../lib/constants'
 import { money2, date, amountInWords, waLink, todayISO, addDays } from '../../lib/format'
 import { Button, Badge, StatusBadge, Card, Loading, ErrorBox, IconBtn, useAction, useToast } from '../../components/ui'
 import DocEditor from './DocEditor'
+import RichText from '../../components/RichText'
+import { PROPOSAL_INTRO, PROPOSAL_ACCEPTANCE } from '../../lib/proposal'
 import { PaymentModal } from './Invoices'
 import { MoneyFlow } from './Suppliers'
 import { CollectModal } from './WalkIn'
@@ -46,7 +48,8 @@ export default function InvoiceView({ kind }) {
   const isFin = has('invoices.manage')
   const canEdit = kind === 'invoice' ? isFin : has('quotations.manage')
   const balance = Number(d.total) - Number(d.amount_paid || 0)
-  const title = kind === 'invoice' ? 'INVOICE' : 'QUOTATION'
+  const proposal = kind === 'quote' && d.full_proposal !== false
+  const title = kind === 'invoice' ? 'INVOICE' : proposal ? 'COMMERCIAL PROPOSAL' : 'QUOTATION'
   const billTo = c ? [c.name, c.contact_person, c.address || c.city, c.phone, c.email].filter(Boolean) : (d.bill_to || '').split('\n')
 
   const setStatus = (status, msg) => run(async () => { await q(supabase.from(table).update({ status }).eq('id', id)); doc.reload() }, msg)
@@ -119,7 +122,7 @@ export default function InvoiceView({ kind }) {
             <div className="small" style={{ marginTop: 8, maxWidth: 320, color: '#555' }}>{st.address}<br />{[st.phone, st.email, st.website].filter(Boolean).join(' · ')}</div>
           </div>
           <div className="right">
-            <h1>{title}</h1>
+            <h1 style={proposal ? { fontSize: 22 } : undefined}>{title}</h1>
             <div className="strong" style={{ fontSize: 15, marginTop: 4 }}>{d.number}</div>
             <div className="small" style={{ marginTop: 8, lineHeight: 1.7 }}>
               Date: <b>{date(d.issue_date)}</b><br />
@@ -135,11 +138,14 @@ export default function InvoiceView({ kind }) {
           </div>
           {kind === 'invoice' && d.status === 'paid' && <span className="paid-stamp">PAID</span>}
         </div>
+        {d.subject && <p style={{ marginTop: 16, fontSize: 15 }}><b>Subject:</b> {d.subject}</p>}
+        {proposal && <div className="proposal-block small"><RichText text={st.proposal_intro ?? PROPOSAL_INTRO} /></div>}
+        {proposal && <div className="proposal-block"><h3>Our quote</h3></div>}
         <table>
           <thead><tr><th style={{ width: 40 }}>#</th><th>Description</th><th className="right">Qty</th><th className="right">Rate</th><th className="right">Amount</th></tr></thead>
           <tbody>
             {(d.items || []).map((it, i) => (
-              <tr key={i}><td>{i + 1}</td><td>{it.description}</td><td className="right">{it.qty}</td><td className="right">{money2(it.rate)}</td><td className="right strong">{money2(Number(it.qty) * Number(it.rate))}</td></tr>
+              <tr key={i}><td>{i + 1}</td><td><div className={it.details ? 'strong' : undefined}>{it.description}</div>{it.details && <div className="item-details">{it.details}</div>}</td><td className="right">{it.qty}</td><td className="right">{money2(it.rate)}</td><td className="right strong">{money2(Number(it.qty) * Number(it.rate))}</td></tr>
             ))}
           </tbody>
         </table>
@@ -154,10 +160,33 @@ export default function InvoiceView({ kind }) {
           <p className="small" style={{ marginTop: 6 }}><b>Received:</b> {pays.data.map((p) => `${money2(p.amount)} by ${p.method} on ${date(p.paid_on)}${p.collected_by && member(p.collected_by) ? ` (received by ${member(p.collected_by).full_name})` : ''}`).join('; ')}</p>
         )}
         {d.notes && <p className="small pre" style={{ marginTop: 14 }}>{d.notes}</p>}
-        <div className="grid g2" style={{ marginTop: 26, gap: 24 }}>
-          {kind === 'invoice' && (st.bank_details || st.upi_id) && <div className="small"><b>Payment details</b><div className="pre" style={{ marginTop: 4, color: '#444' }}>{st.bank_details}{st.upi_id && `\nUPI: ${st.upi_id}`}</div></div>}
-          {d.terms && <div className="small"><b>Terms</b><div className="pre" style={{ marginTop: 4, color: '#444' }}>{d.terms}</div></div>}
-        </div>
+        {proposal ? (
+          <>
+            {(d.responsibilities || d.exclusions) && (
+              <div className="grid g2 proposal-block small" style={{ gap: 24 }}>
+                {d.responsibilities && <div><h3 style={{ fontSize: 13 }}>Client responsibilities</h3><RichText text={d.responsibilities} /></div>}
+                {d.exclusions && <div><h3 style={{ fontSize: 13 }}>Not included</h3><RichText text={d.exclusions} /></div>}
+              </div>
+            )}
+            {d.terms && <div className="proposal-block small page-break"><h3>Terms &amp; conditions</h3><div className="terms-cols"><RichText text={d.terms} numbered /></div></div>}
+            {(st.bank_details || st.upi_id) && <div className="proposal-block small"><b>Payment details</b><div className="pre" style={{ marginTop: 4, color: '#444' }}>{st.bank_details}{st.upi_id && `\nUPI: ${st.upi_id}`}</div></div>}
+            <div className="proposal-block small">
+              <h3>Acceptance</h3>
+              <RichText text={st.proposal_acceptance ?? PROPOSAL_ACCEPTANCE} />
+              <p style={{ marginTop: 10 }}><b>Plan / services selected:</b> {(d.items || []).map((it) => `${it.description}${Number(it.qty) !== 1 ? ` × ${it.qty}` : ''}`).join(', ')} — <b>{money2(d.total)}</b></p>
+              <div className="sign-grid">
+                <div>Client name</div><div>Designation</div>
+                <div>Contact number</div><div>Date</div>
+                <div>Client signature &amp; seal</div><div>For {st.company_name}</div>
+              </div>
+            </div>
+          </>
+        ) : (
+          <div className="grid g2" style={{ marginTop: 26, gap: 24 }}>
+            {kind === 'invoice' && (st.bank_details || st.upi_id) && <div className="small"><b>Payment details</b><div className="pre" style={{ marginTop: 4, color: '#444' }}>{st.bank_details}{st.upi_id && `\nUPI: ${st.upi_id}`}</div></div>}
+            {d.terms && <div className="small"><b>Terms</b><div style={{ marginTop: 4, color: '#444' }}><RichText text={d.terms} /></div></div>}
+          </div>
+        )}
         <div className="center tiny" style={{ marginTop: 36, color: '#999', borderTop: '1px solid #eee', paddingTop: 12 }}>Thank you for choosing {st.company_name}. This is a computer-generated document.</div>
       </div>
 

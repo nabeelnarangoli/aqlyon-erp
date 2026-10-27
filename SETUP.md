@@ -142,6 +142,15 @@ Weeks follow the sheet: Week 1 = 1st–7th, Week 2 = 8th–14th, Week 3 = 15th�
 - **@mentions**: in task chat, query replies and new queries, type `@` and pick a name. That person gets a mention notification.
 - **Pop-ups**: unread notifications appear as cards at the bottom-right (approvals first) and stay until you press **Mark read** or open them.
 
+## Quotations as commercial proposals
+
+New quotations print as Aqlyon's standard **Commercial Proposal**: about us & objectives, the quoted services (with what each includes), client responsibilities, what's not included, the 13-section Terms & Conditions, payment details and an acceptance/signature block that works as a purchase order.
+
+- Edit the standard text once in **Settings → Quotation & proposal** (format: `## Heading`, `- bullet`, `**bold**`).
+- On each quotation you can add a subject, change responsibilities / exclusions / terms for that client only, or untick *Print as full commercial proposal* for a short quote.
+- **Settings → Services & pricing** now holds every service from the proposal (Starter Package ₹14,999 with its inclusions, and each individual service). Services with no fixed price show *Quote per job* — the rate is typed on the quotation.
+- The proposal's rules are applied in the system: 2 revisions per design by default, and the client approval page asks clients to reply within 24 hours.
+
 ## Updating the database later
 
 When a new version of `supabase/schema.sql` ships, run it again in the SQL Editor — it only adds or replaces what changed and keeps your data.

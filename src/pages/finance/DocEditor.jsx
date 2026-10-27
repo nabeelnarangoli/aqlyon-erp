@@ -1,3 +1,4 @@
+import { QUOTE_TERMS, CLIENT_RESPONSIBILITIES, PROPOSAL_EXCLUSIONS } from '../../lib/proposal'
 import { useMemo } from 'react'
 import { Plus, Trash2, Check } from 'lucide-react'
 import { supabase, q } from '../../lib/supabase'
@@ -17,7 +18,10 @@ export default function DocEditor({ kind, doc = {}, onClose, onSaved }) {
   const [f, set, setF] = useForm({
     client_id: '', lead_id: null, bill_to: '', issue_date: todayISO(),
     ...(kind === 'invoice' ? { due_date: addDays(todayISO(), 7), status: 'draft' } : { valid_until: addDays(todayISO(), 15), status: 'draft' }),
-    items: [{ description: '', qty: 1, rate: 0 }], discount: 0, notes: '', terms: settings?.invoice_terms || '', ...doc
+    items: [{ description: '', qty: 1, rate: 0 }], discount: 0, notes: '',
+    ...(kind === 'invoice' ? { terms: settings?.invoice_terms || '' }
+      : { terms: settings?.quote_terms || QUOTE_TERMS, full_proposal: true, subject: '', responsibilities: settings?.client_responsibilities ?? CLIENT_RESPONSIBILITIES, exclusions: settings?.proposal_exclusions ?? PROPOSAL_EXCLUSIONS }),
+    ...doc
   })
   const services = useData(() => q(supabase.from('services').select('*').eq('active', true).order('category').order('name')), [], [])
   const packs = useData(async () => {
@@ -31,18 +35,18 @@ export default function DocEditor({ kind, doc = {}, onClose, onSaved }) {
   const subtotal = useMemo(() => items.reduce((a, i) => a + Number(i.qty || 0) * Number(i.rate || 0), 0), [items])
   const total = Math.max(0, subtotal - Number(f.discount || 0))
   const setItem = (idx, k, v) => setF((s) => ({ ...s, items: s.items.map((it, i) => (i === idx ? { ...it, [k]: v } : it)) }))
-  const addItem = (svc) => setF((s) => ({ ...s, items: [...s.items.filter((i) => i.description || Number(i.rate)), svc ? { description: svc.name, qty: 1, rate: Number(svc.rate) } : { description: '', qty: 1, rate: 0 }] }))
+  const addItem = (svc) => setF((s) => ({ ...s, items: [...s.items.filter((i) => i.description || Number(i.rate)), svc ? { description: svc.name, details: svc.description || '', qty: 1, rate: Number(svc.rate) } : { description: '', qty: 1, rate: 0 }] }))
   const removeItem = (idx) => setF((s) => ({ ...s, items: s.items.filter((_, i) => i !== idx) }))
   const [busy, run] = useAction()
 
   const save = (e) => { e.preventDefault(); run(async () => {
-    const clean = items.filter((i) => i.description && Number(i.qty) > 0).map((i) => ({ description: i.description, qty: Number(i.qty), rate: Number(i.rate || 0), ...(i.package_id ? { package_id: i.package_id } : {}) }))
+    const clean = items.filter((i) => i.description && Number(i.qty) > 0).map((i) => ({ description: i.description, qty: Number(i.qty), rate: Number(i.rate || 0), ...(i.details?.trim() ? { details: i.details.trim() } : {}), ...(i.package_id ? { package_id: i.package_id } : {}) }))
     if (!clean.length) throw new Error('Add at least one line item')
     if (kind === 'invoice' && !f.client_id) throw new Error('Choose a client')
     if (kind === 'invoice' && f.package_id && !clean.some((i) => i.package_id === f.package_id)) { f.package_id = null; f.period_month = null }
     const p = { ...f, items: clean, discount: Number(f.discount || 0), client_id: f.client_id || null }
     ;['id', 'number', 'subtotal', 'total', 'amount_paid', 'created_at', 'created_by', 'clients', 'balance', 'overdue', 'days_overdue', 'client_name', 'leads'].forEach((k) => delete p[k])
-    if (kind === 'invoice') ['lead_id', 'bill_to', 'valid_until'].forEach((k) => delete p[k])
+    if (kind === 'invoice') ['lead_id', 'bill_to', 'valid_until', 'full_proposal', 'subject', 'responsibilities', 'exclusions'].forEach((k) => delete p[k])
     else ['due_date', 'package_id', 'period_month', 'project_id', 'quotation_id'].forEach((k) => delete p[k])
     if (kind === 'quote' && !p.bill_to && lead.data) p.bill_to = [lead.data.company || lead.data.name, lead.data.city, lead.data.phone].filter(Boolean).join('\n')
     const row = isNew ? await q(supabase.from(table).insert(p).select().single()) : await q(supabase.from(table).update(p).eq('id', doc.id).select().single())
@@ -106,7 +110,7 @@ export default function DocEditor({ kind, doc = {}, onClose, onSaved }) {
           <div className="row gap-s">
             <select className="input input-sm" style={{ width: 280 }} value="" onChange={(e) => { const s = services.data.find((x) => x.id === e.target.value); if (s) addItem(s) }}>
               <option value="">+ Add from service catalogue…</option>
-              {Object.entries(grouped).map(([g, list]) => <optgroup key={g} label={g}>{list.map((s) => <option key={s.id} value={s.id}>{s.name} — ₹{Number(s.rate).toLocaleString('en-IN')}</option>)}</optgroup>)}
+              {Object.entries(grouped).map(([g, list]) => <optgroup key={g} label={g}>{list.map((s) => <option key={s.id} value={s.id}>{s.name}{Number(s.rate) ? ` — ₹${Number(s.rate).toLocaleString('en-IN')}` : ' — enter rate'}</option>)}</optgroup>)}
             </select>
             <Button type="button" size="sm" variant="outline" icon={Plus} onClick={() => addItem()}>Blank line</Button>
           </div>
@@ -117,7 +121,12 @@ export default function DocEditor({ kind, doc = {}, onClose, onSaved }) {
             <tbody>
               {items.map((it, i) => (
                 <tr key={i}>
-                  <td><input className="input" value={it.description} onChange={(e) => setItem(i, 'description', e.target.value)} placeholder="Service / deliverable" /></td>
+                  <td>
+                    <input className="input" value={it.description} onChange={(e) => setItem(i, 'description', e.target.value)} placeholder="Service / deliverable" />
+                    {it.details !== undefined
+                      ? <textarea className="input" rows={2} style={{ marginTop: 6, fontSize: 12.5 }} value={it.details} onChange={(e) => setItem(i, 'details', e.target.value)} placeholder="What's included (shown under the item)" />
+                      : <button type="button" className="link-btn tiny" style={{ marginTop: 4 }} onClick={() => setItem(i, 'details', '')}>+ add details</button>}
+                  </td>
                   <td><input className="input right" style={{ width: 80 }} type="number" min="0" step="any" value={it.qty} onChange={(e) => setItem(i, 'qty', e.target.value)} /></td>
                   <td><input className="input right" style={{ width: 120 }} type="number" min="0" step="any" value={it.rate} onChange={(e) => setItem(i, 'rate', e.target.value)} /></td>
                   <td className="num strong">{money2(Number(it.qty || 0) * Number(it.rate || 0))}</td>
@@ -134,8 +143,26 @@ export default function DocEditor({ kind, doc = {}, onClose, onSaved }) {
         </div>
         <div className="form mt">
           <Field label="Notes (shown on document)"><Textarea value={f.notes} onChange={set('notes')} /></Field>
-          <Field label="Terms"><Textarea value={f.terms} onChange={set('terms')} /></Field>
+          {kind === 'invoice' && <Field label="Terms"><Textarea value={f.terms} onChange={set('terms')} /></Field>}
         </div>
+        {kind === 'quote' && (
+          <div className="card card-body mt">
+            <div className="row between wrap gap-s">
+              <h3 style={{ margin: 0 }}>Proposal &amp; terms</h3>
+              <label className="check"><input type="checkbox" checked={f.full_proposal !== false} onChange={(e) => set('full_proposal')(e.target.checked)} />Print as full commercial proposal (about us, objectives, responsibilities, T&amp;C, signature)</label>
+            </div>
+            <div className="form mt">
+              <Field label="Subject / title" span={2} hint="e.g. Social media marketing for the new branch"><Input value={f.subject || ''} onChange={set('subject')} /></Field>
+              {f.full_proposal !== false && <>
+                <Field label="Client responsibilities"><Textarea rows={5} value={f.responsibilities || ''} onChange={set('responsibilities')} /></Field>
+                <Field label="Not included"><Textarea rows={5} value={f.exclusions || ''} onChange={set('exclusions')} /></Field>
+              </>}
+              <Field label="Terms & conditions" span={2} hint="## Heading, - bullet, **bold**. Starts from Settings → Quotation & proposal; edit here for this quote only.">
+                <Textarea rows={8} value={f.terms || ''} onChange={set('terms')} />
+              </Field>
+            </div>
+          </div>
+        )}
       </form>
     </Modal>
   )

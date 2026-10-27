@@ -1,9 +1,10 @@
 import { DEFAULT_ROLES } from './permissions'
+import { QUOTE_TERMS, PROPOSAL_INTRO, CLIENT_RESPONSIBILITIES, PROPOSAL_EXCLUSIONS, PROPOSAL_ACCEPTANCE, PROPOSAL_SERVICES } from './proposal'
 // In-browser demo backend: mimics the subset of supabase-js the app uses, plus the
 // database triggers/RPCs from supabase/schema.sql, on sample data kept in localStorage.
 // Only used when the app is built with VITE_DEMO=1.
 
-const KEY = 'aqlyon-erp-demo-v10'
+const KEY = 'aqlyon-erp-demo-v11'
 const SKEY = 'aqlyon-erp-demo-session'
 const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : 'id-' + Math.random().toString(36).slice(2) + Date.now().toString(36))
 const nowISO = () => new Date().toISOString()
@@ -69,7 +70,7 @@ const DEFAULTS = {
   query_replies: () => ({ author_id: uid() }),
   content_posts: () => ({ results: [], platforms: ['Instagram'], post_type: 'Post', status: 'idea', reach: 0, likes: 0, comments: 0, shares: 0, saves: 0, created_by: uid(), updated_at: nowISO() }),
   approval_links: () => ({ token: uuid().replace(/-/g, '').slice(0, 36), expires_at: new Date(Date.now() + 30 * 86400000).toISOString(), revoked: false, created_by: uid() }),
-  quotations: () => ({ issue_date: iso(new Date()), valid_until: day(15), items: [], discount: 0, status: 'draft', created_by: uid() }),
+  quotations: () => ({ full_proposal: true, issue_date: iso(new Date()), valid_until: day(15), items: [], discount: 0, status: 'draft', created_by: uid() }),
   invoices: () => ({ sale_channel: 'office', issue_date: iso(new Date()), due_date: day(7), items: [], discount: 0, amount_paid: 0, status: 'draft', created_by: uid() }),
   payments: () => ({ paid_on: iso(new Date()), method: 'UPI', created_by: uid(), collected_by: uid() }),
   expenses: () => ({ spent_on: iso(new Date()), category: 'Office Supplies', method: 'UPI', rebillable: false, recurring: false, created_by: uid() }),
@@ -550,7 +551,7 @@ function rpc(name, a) {
         if (pr.client_decision && new Date(pr.client_decided_at) < new Date(Date.now() - 14 * 86400000)) return false
         return pr.version === Math.max(...T('task_proofs').filter((x) => x.task_id === t.id).map((x) => x.version))
       }).map((pr) => { const t = T('design_tasks').find((x) => x.id === pr.task_id); return { ...pr, task_code: t.code, task_title: t.title, task_type: t.task_type } })
-      return { data: clone({ client: { name: c.name, contact: c.contact_person }, company: { name: st.company_name, phone: st.phone, website: st.website }, posts, proofs }), error: null }
+      return { data: clone({ client: { name: c.name, contact: c.contact_person }, company: { name: st.company_name, phone: st.phone, website: st.website, approval_hours: st.approval_hours || 24 }, posts, proofs }), error: null }
     }
     if (name === 'portal_decide') {
       const l = T('approval_links').find((x) => x.token === a.p_token && !x.revoked); if (!l) return { data: { error: 'Link invalid or expired' }, error: null }
@@ -647,7 +648,8 @@ function seed() {
   db.settings = [{ id: 1, company_name: 'Aqlyon Brand Management', address: 'First Floor, Muhyiddin Building, behind Municipal Shopping Complex, Koyilandy, Keralam 673305, India',
     phone: '+91 70341 42256', email: 'hello@aqlyondm.com', website: 'www.aqlyondm.com', currency: 'INR', invoice_prefix: 'AQB-INV', quote_prefix: 'AQB-QT', po_prefix: 'AQB-PO', task_prefix: 'DT',
     bank_details: 'Aqlyon Brand Management\nYour Bank, Koyilandy branch\nA/c XXXX XXXX 1234\nIFSC XXXX0001234', upi_id: 'aqlyonbrand@upi',
-    invoice_terms: 'Payment due within 7 days of invoice date. Thank you for your business!', default_max_revisions: 3 }]
+    invoice_terms: 'Payment due within 7 days of invoice date. Thank you for your business!', default_max_revisions: 2, approval_hours: 24,
+    quote_terms: QUOTE_TERMS, proposal_intro: PROPOSAL_INTRO, client_responsibilities: CLIENT_RESPONSIBILITIES, proposal_exclusions: PROPOSAL_EXCLUSIONS, proposal_acceptance: PROPOSAL_ACCEPTANCE }]
   const prev = currentUser
   const as = (id) => { currentUser = db.profiles.find((p) => p.id === id) }
   const ins = (t, v) => { const { data } = new Query(t).insert(v).exec(); return Array.isArray(data) ? data[0] : data }
@@ -659,6 +661,7 @@ function seed() {
     ['Brochure / Flyer Design', 'Design', 'per item', 2000], ['Meta Ads Management', 'Ads', 'per month', 6000], ['Google Ads Management', 'Ads', 'per month', 7000],
     ['SEO – Local / Google Business Profile', 'SEO', 'per month', 5000], ['Website Design – Landing Page', 'Web', 'per project', 15000], ['Product / Promo Shoot', 'Video', 'per project', 8000]]
     .forEach(([name, category, unit, rate]) => ins('services', { name, category, unit, rate }))
+  PROPOSAL_SERVICES.forEach(([name, category, unit, rate, description]) => ins('services', { name, category, unit, rate, description }))
 
   as(mk)
   const c1 = ins('clients', { name: 'Malabar Bakes & Café', contact_person: 'Ashraf P', phone: '9847012345', whatsapp: '9847012345', city: 'Koyilandy', industry: 'Bakery', instagram: '@malabarbakes', account_manager_id: mk,

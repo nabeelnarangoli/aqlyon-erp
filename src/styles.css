@@ -452,3 +452,18 @@ body.pdf-capture .print-only { display: block !important; }
 body.pdf-capture img.print-only { display: inline-block !important; }
 body.pdf-capture .doc { box-shadow: none; border: 0; }
 @media print { .wo-doc .print-only { display: block; } }
+/* proposal / terms text */
+.rich h4 { margin: 14px 0 4px; font-size: 13.5px; color: var(--ink); }
+.rich p { margin: 4px 0 8px; line-height: 1.55; }
+.rich ul { margin: 2px 0 8px; padding-left: 18px; }
+.rich li { margin: 2px 0; line-height: 1.5; }
+.doc .proposal-block { margin-top: 26px; }
+.doc .proposal-block > h3 { font-size: 15px; letter-spacing: .04em; text-transform: uppercase; color: var(--green-d); border-bottom: 2px solid var(--green-100, #d8f3e6); padding-bottom: 6px; margin: 0 0 8px; }
+.doc .terms-cols { columns: 2; column-gap: 28px; }
+.doc .terms-cols h4 { break-after: avoid; }
+.doc .terms-cols ul { break-inside: avoid; }
+.doc .item-details { font-size: 12px; color: #666; margin-top: 3px; white-space: pre-line; }
+.doc .sign-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 28px; margin-top: 12px; }
+.doc .sign-grid div { border-bottom: 1px solid #bbb; padding: 18px 0 4px; font-size: 12px; color: #666; }
+@media (max-width: 720px) { .doc .terms-cols { columns: 1; } }
+@media print { .doc .page-break { break-before: page; } }

@@ -1445,6 +1445,94 @@ end $$;
 drop trigger if exists trg_query_mentions on public.queries;
 create trigger trg_query_mentions after insert on public.queries for each row execute function public.query_mentions();
 
+-- ---------------------------------------------------------------------
+-- 10g. COMMERCIAL PROPOSAL (quotation) CONTENT — from the standard Aqlyon proposal
+--   Text uses a light format: "## Heading", "- bullet", **bold**.
+-- ---------------------------------------------------------------------
+do $$ begin
+  if not exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'settings' and column_name = 'quote_terms') then
+    alter table public.settings add column quote_terms text;
+    -- first time only: the proposal says two revisions per creative are included
+    update public.settings set default_max_revisions = 2 where id = 1 and default_max_revisions = 3;
+  end if;
+end $$;
+alter table public.settings add column if not exists proposal_intro text;
+alter table public.settings add column if not exists client_responsibilities text;
+alter table public.settings add column if not exists proposal_exclusions text;
+alter table public.settings add column if not exists proposal_acceptance text;
+alter table public.settings add column if not exists approval_hours int not null default 24;
+update public.settings set
+  quote_terms = coalesce(quote_terms, '## Project Scope
+- The scope of work is limited to the services mentioned in the selected package.
+- Any additional work requested outside the agreed scope will be quoted separately and undertaken only after written approval.
+## Campaign Duration
+- The campaign will commence upon receipt of the advance payment and all required content from the client.
+- The proposal is designed to support the brand until the agreed campaign period. Any extension beyond the agreed campaign period will be charged separately.
+## Payment Terms
+- **50% advance payment** is required to initiate the project.
+- The remaining **50% must be paid before the completion of the campaign**.
+- All payments are non-refundable once the campaign has commenced.
+## Advertisement Budget
+- The quoted package includes **advertisement management only**.
+- The actual advertising budget for Meta (Facebook & Instagram) and/or Google Ads is **not included** in the package price and shall be paid directly by the client to the respective advertising platform.
+## Approval Process
+- All creatives, captions, and promotional materials will be shared for approval before publishing.
+- The client is requested to provide feedback within **24 hours**.
+- If no response is received within this period, Aqlyon Brand Management reserves the right to proceed with the scheduled publication to avoid campaign delays.
+## Revisions
+- Up to **two revisions** are included for each creative design.
+- Additional revisions or major design changes after approval may incur additional charges.
+## Photography & Videography
+- Photography, videography, drone shoots, and event coverage are included only in packages where explicitly mentioned or when purchased as add-on services.
+- Weather conditions, venue restrictions, or unforeseen circumstances may affect outdoor shoots.
+## Performance Disclaimer
+- Aqlyon Brand Management will use industry best practices to maximize campaign performance.
+- However, specific business outcomes such as sales, revenue, customer footfall, or return on investment (ROI) cannot be guaranteed, as these depend on various external factors including market conditions, pricing, competition, customer behavior, and advertisement budget.
+## Intellectual Property
+- Upon full payment, all approved creative assets produced specifically for this campaign become the property of the client.
+- Aqlyon Brand Management reserves the right to showcase completed work in its portfolio, website, and social media channels unless otherwise agreed in writing.
+## Campaign Schedule
+- Campaign timelines are based on the agreed project schedule.
+- Any postponement by the client may require revisions to the campaign plan and may result in additional charges if the campaign duration is extended.
+## Cancellation
+- If the project is cancelled after work has commenced, the advance payment will not be refunded.
+- Any completed work beyond the value of the advance payment will be invoiced separately.
+## Communication
+- All official project communications, approvals, and change requests should be made through email or WhatsApp to ensure proper documentation.
+## Proposal Validity
+- This proposal and pricing are valid for **15 days** from the date of issue.'),
+  proposal_intro = coalesce(proposal_intro, '## Who are we?
+At Aqlyon Brand Management, we transform bold ideas into powerful digital stories.
+We''re a next-gen digital marketing and creative agency driven by innovation, strategy, and storytelling. From corporate and personal branding to explainer videos, social media content, and full-scale brand management, we help brands stand out in a world full of noise.
+Whether you''re launching a startup, elevating a personal brand, or scaling a corporation, we create content that connects, campaigns that convert, and strategies that stick. With a team of passionate creatives and digital experts, Aqlyon is your all-in-one partner for building visibility, authority, and emotional impact in the digital age.
+## Proposal Objective
+Today''s customers discover products through Facebook, Instagram, Google Search, and WhatsApp before they visit a store. Our goal is to increase your brand''s visibility in the local market, attract more potential customers, and build a strong online presence for your business.
+## Our Objectives
+- Increasing local brand awareness in your locality and nearby areas
+- Building trust through consistent online presence
+- Showcasing new arrivals and attractive collections
+- Driving more customer enquiries through WhatsApp and social media
+- Encouraging more walk-in customers
+- Creating a professional digital identity for the business
+**Please note:** Digital marketing helps improve visibility, reach, engagement, and customer enquiries. However, sales depend on several factors including pricing, product selection, customer experience, competition, seasonality, and market demand. Therefore, we do not guarantee a specific number of sales or revenue.'),
+  client_responsibilities = coalesce(client_responsibilities, '- Provide logo and branding materials
+- Product photographs (or allow our team to capture them)
+- Offer details (if any)
+- Advertisement budget
+- Design approvals within 24 hours
+Delays in providing the above may affect the campaign schedule.'),
+  proposal_exclusions = coalesce(proposal_exclusions, '- Photography / Videography
+- Event Coverage
+- Google Business Profile Optimization
+- Advertisement budget (paid directly by the client)'),
+  proposal_acceptance = coalesce(proposal_acceptance, 'By confirming this proposal and making the advance payment, the client acknowledges that they have read, understood, and agreed to all the terms and conditions stated above. Once signed below, this document can be considered as an official Purchase Order.')
+where id = 1;
+-- per quotation: print as a full commercial proposal (intro, responsibilities, T&C, signature) or a short quote
+alter table public.quotations add column if not exists full_proposal boolean not null default true;
+alter table public.quotations add column if not exists subject text;
+alter table public.quotations add column if not exists responsibilities text;
+alter table public.quotations add column if not exists exclusions text;
+
 -- every money movement in one place (in = client payments, out = supplier payments + expenses)
 create or replace view public.v_money_movements with (security_invoker = true) as
 select p.id, p.paid_on as on_date, 'in'::text as direction, 'Client payment'::text as kind, p.amount, p.method, p.reference, p.note,
@@ -1478,7 +1566,7 @@ begin
   select * into c from public.clients where id = lnk.client_id;
   select jsonb_build_object(
     'client', jsonb_build_object('name', c.name, 'contact', c.contact_person),
-    'company', (select jsonb_build_object('name', company_name, 'phone', phone, 'website', website) from public.settings where id=1),
+    'company', (select jsonb_build_object('name', company_name, 'phone', phone, 'website', website, 'approval_hours', approval_hours) from public.settings where id=1),
     'posts', coalesce((select jsonb_agg(to_jsonb(p) - 'created_by' order by p.publish_date)
               from (select id, publish_date, publish_time, platforms, post_type, title, caption, hashtags, cta, media_link, status, client_note, design_task_id
                     from public.content_posts
@@ -1802,6 +1890,37 @@ select * from (values
   ('Product / Promo Shoot', 'Video', 'per project', 8000)
 ) v(name, category, unit, rate)
 where not exists (select 1 from public.services);
+
+-- services from the standard commercial proposal (added once each; rates of 0 are filled in per quote)
+insert into public.services (name, category, unit, rate, description)
+select v.name, v.category, v.unit, v.rate, v.description from (values
+  ('Starter Package – Social Media & Brand Management', 'Social Media', 'per month', 14999, 'Facebook, Instagram & Google Business Profile management · 12 creative posts + 8 promotional stories per month · locally-tailored, search-optimised content · product showcase, festival, offer & WhatsApp status designs · captions with hashtags, local keywords & CTA · Google Business updates · WhatsApp marketing creatives · Facebook & Instagram ads management (ad budget paid by client) · marketing ideas'),
+  ('Facebook Page Management', 'Social Media', 'per month', 0, 'Posting, page upkeep and audience engagement'),
+  ('Instagram Management', 'Social Media', 'per month', 0, 'Posting, profile upkeep and audience engagement'),
+  ('Google Business Profile Management', 'SEO', 'per month', 0, 'Publishing business updates, uploading promotional creatives, optimising profile visibility, encouraging customer engagement'),
+  ('Google Business Profile Optimization', 'SEO', 'per project', 0, 'One-time profile set-up and optimisation'),
+  ('Creative Post Design', 'Design', 'per item', 0, 'Brand-matched social media post'),
+  ('Promotional Story Design', 'Design', 'per item', 0, 'Instagram / Facebook story'),
+  ('Product Showcase Design', 'Design', 'per item', 0, NULL),
+  ('Product Poster Design', 'Design', 'per item', 0, NULL),
+  ('Festival & Special Occasion Creative', 'Design', 'per item', 0, 'Festival greetings and occasion posts'),
+  ('Offer Poster Design', 'Design', 'per item', 0, NULL),
+  ('Promotional Banner Design', 'Design', 'per item', 0, NULL),
+  ('WhatsApp Status Design', 'Design', 'per item', 0, NULL),
+  ('Customer Engagement Post', 'Design', 'per item', 0, 'Polls, questions and interactive posts'),
+  ('Content Writing – Locally-tailored & Search Optimised', 'Content', 'per month', 0, NULL),
+  ('Caption Writing', 'Content', 'per item', 0, 'Attractive caption, relevant hashtags, local targeting keywords and a clear call-to-action'),
+  ('Marketing Ideas & Campaign Planning', 'Content', 'per month', 0, NULL),
+  ('Influencer Collaboration', 'Social Media', 'per project', 0, 'Coordination with local influencers (influencer fee extra)'),
+  ('Reel Creation', 'Video', 'per item', 0, 'Concept, shoot and edit of a short reel'),
+  ('WhatsApp Marketing Creatives', 'Design', 'per month', 0, 'Ready-to-share promotional posters, festival greetings, offer creatives and product highlights'),
+  ('Bulk WhatsApp Messaging', 'Other', 'per 1,000 contacts', 0, 'Charge depends on the number of contacts'),
+  ('Paid Ads Management – Facebook & Instagram', 'Ads', 'per month', 0, 'Audience targeting within the customer''s location and nearby areas, campaign optimisation. Ad budget paid directly by the client.'),
+  ('Photography / Videography', 'Photography', 'per project', 0, NULL),
+  ('Drone Shoot', 'Photography', 'per project', 0, NULL),
+  ('Event Coverage', 'Photography', 'per event', 0, NULL)
+) v(name, category, unit, rate, description)
+where not exists (select 1 from public.services s where lower(s.name) = lower(v.name));
 
 -- ---------------------------------------------------------------------
 -- 17. GRANTS (Supabase sets these by default; repeated here for safety)
