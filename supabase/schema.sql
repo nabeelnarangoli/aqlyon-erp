@@ -1965,3 +1965,6 @@ grant select, insert, update, delete on all tables in schema public to authentic
 grant usage, select on all sequences in schema public to authenticated;
 grant execute on function public.convert_lead(uuid) to authenticated;
 grant execute on function public.generate_retainer_invoices(date) to authenticated;
+
+-- make the API pick up new tables / columns straight away
+notify pgrst, 'reload schema';
