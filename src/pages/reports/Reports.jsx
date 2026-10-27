@@ -69,14 +69,15 @@ function ChartCard({ title, children, h = 280 }) {
 /* ---------------- P&L ---------------- */
 function PnL({ from, to }) {
   const { data, loading } = useData(async () => {
-    const [inv, pay, exp, sb, sp] = await Promise.all([
+    const [inv, pay, exp, sb, sp, rb] = await Promise.all([
       q(supabase.from('invoices').select('issue_date,total,status').neq('status', 'cancelled').neq('status', 'draft').gte('issue_date', from).lte('issue_date', to)),
       q(supabase.from('payments').select('paid_on,amount').gte('paid_on', from).lte('paid_on', to)),
-      q(supabase.from('expenses').select('spent_on,amount,category,rebillable,supplier_id,vendor').gte('spent_on', from).lte('spent_on', to)),
+      q(supabase.from('expenses').select('spent_on,amount,category,rebillable,supplier_id,vendor,paid_by').gte('spent_on', from).lte('spent_on', to)),
       q(supabase.from('supplier_bills').select('order_date,total,status,supplier_id, suppliers(name)').neq('status', 'cancelled').gte('order_date', from).lte('order_date', to)),
-      q(supabase.from('supplier_payments').select('paid_on,amount').gte('paid_on', from).lte('paid_on', to))
+      q(supabase.from('supplier_payments').select('paid_on,amount').gte('paid_on', from).lte('paid_on', to)),
+      q(supabase.from('reimbursements').select('paid_on,amount').gte('paid_on', from).lte('paid_on', to)).catch(() => [])
     ])
-    return { inv, pay, exp, sb, sp }
+    return { inv, pay, exp, sb, sp, rb }
   }, [from, to], null)
   if (loading || !data) return <Loading />
   const months = monthsBetween(from, to)
@@ -87,14 +88,16 @@ function PnL({ from, to }) {
       Collected: data.pay.filter((x) => x.paid_on.startsWith(k)).reduce((a, x) => a + Number(x.amount), 0),
       Expenses: data.exp.filter((x) => x.spent_on.startsWith(k)).reduce((a, x) => a + Number(x.amount), 0),
       Suppliers: data.sb.filter((x) => x.order_date.startsWith(k)).reduce((a, x) => a + Number(x.total), 0),
-      SupPaid: data.sp.filter((x) => x.paid_on.startsWith(k)).reduce((a, x) => a + Number(x.amount), 0)
+      SupPaid: data.sp.filter((x) => x.paid_on.startsWith(k)).reduce((a, x) => a + Number(x.amount), 0),
+      // cash actually paid for expenses: company-account expenses + repayments to founders / staff
+      ExpPaid: data.exp.filter((x) => !x.paid_by && x.spent_on.startsWith(k)).reduce((a, x) => a + Number(x.amount), 0) + data.rb.filter((x) => x.paid_on.startsWith(k)).reduce((a, x) => a + Number(x.amount), 0)
     }
     r.Costs = r.Expenses + r.Suppliers
-    r.Profit = r.Invoiced - r.Costs; r.Cash = r.Collected - r.Expenses - r.SupPaid
+    r.Profit = r.Invoiced - r.Costs; r.Cash = r.Collected - r.ExpPaid - r.SupPaid
     return r
   })
-  const T = rows.reduce((a, r) => ({ Invoiced: a.Invoiced + r.Invoiced, Collected: a.Collected + r.Collected, Expenses: a.Expenses + r.Expenses, Suppliers: a.Suppliers + r.Suppliers, SupPaid: a.SupPaid + r.SupPaid }), { Invoiced: 0, Collected: 0, Expenses: 0, Suppliers: 0, SupPaid: 0 })
-  const profit = T.Invoiced - T.Expenses - T.Suppliers, cash = T.Collected - T.Expenses - T.SupPaid
+  const T = rows.reduce((a, r) => ({ Invoiced: a.Invoiced + r.Invoiced, Collected: a.Collected + r.Collected, Expenses: a.Expenses + r.Expenses, Suppliers: a.Suppliers + r.Suppliers, SupPaid: a.SupPaid + r.SupPaid, ExpPaid: a.ExpPaid + r.ExpPaid }), { Invoiced: 0, Collected: 0, Expenses: 0, Suppliers: 0, SupPaid: 0, ExpPaid: 0 })
+  const profit = T.Invoiced - T.Expenses - T.Suppliers, cash = T.Collected - T.ExpPaid - T.SupPaid
   const byPayee = Object.values([...data.exp.filter((e) => e.supplier_id).map((e) => ({ id: e.supplier_id, name: e.vendor, amt: Number(e.amount), kind: 'exp' })),
     ...data.sb.filter((b) => b.supplier_id).map((b) => ({ id: b.supplier_id, name: b.suppliers?.name, amt: Number(b.total), kind: 'sup' }))]
     .reduce((a, x) => { a[x.id] ||= { id: x.id, name: x.name, exp: 0, sup: 0 }; a[x.id][x.kind] += x.amt; return a }, {})).map((x) => ({ ...x, total: x.exp + x.sup })).sort((a, b) => b.total - a.total)
@@ -105,7 +108,7 @@ function PnL({ from, to }) {
         <Stat label="Revenue (invoiced)" value={money(T.Invoiced)} />
         <Stat label="Cash collected" value={money(T.Collected)} tone="teal" />
         <Stat label="Supplier costs" value={money(T.Suppliers)} sub={`${money(T.SupPaid)} paid out`} tone="orange" />
-        <Stat label="Expenses" value={money(T.Expenses)} tone="red" />
+        <Stat label="Expenses" value={money(T.Expenses)} sub={T.Expenses !== T.ExpPaid ? `${money(T.ExpPaid)} paid out in cash` : undefined} tone="red" />
         <Stat label="Profit (accrual)" value={money(profit)} sub={`${pct(profit, T.Invoiced)}% margin`} tone={profit >= 0 ? 'green' : 'red'} />
         <Stat label="Net cash flow" value={money(cash)} sub="In − expenses − supplier payments" tone="violet" />
       </div>

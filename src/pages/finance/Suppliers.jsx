@@ -98,7 +98,7 @@ export function SupplierModal({ supplier, onClose, onSaved }) {
 }
 
 function SupplierDetail({ id, onBack }) {
-  const { has } = useAuth()
+  const { has, member } = useAuth()
   const [editing, setEditing] = useState(false)
   const [order, setOrder] = useState(null)
   const [tab, setTab] = useState('statement')
@@ -121,7 +121,7 @@ function SupplierDetail({ id, onBack }) {
   const lines = [
     ...live.filter((b) => inRange(b.order_date)).map((b) => ({ d: b.order_date, k: 'b' + b.id, type: 'Work order', ref: b.number, text: b.title, billed: Number(b.total), paid: 0, open: () => setOrder({ open: b.id }) })),
     ...pays.data.filter((p) => inRange(p.paid_on)).map((p) => ({ d: p.paid_on, k: 'p' + p.id, type: `Payment · ${p.kind}`, ref: p.supplier_bills?.number, text: [p.method, p.reference, p.note].filter(Boolean).join(' · '), billed: 0, paid: Number(p.amount), open: p.bill_id && (() => setOrder({ open: p.bill_id })) })),
-    ...exps.data.filter((e) => inRange(e.spent_on)).map((e) => ({ d: e.spent_on, k: 'e' + e.id, type: `Expense · ${e.category}`, ref: '', text: [e.description, e.clients?.name && `for ${e.clients.name}`, e.method].filter(Boolean).join(' · '), billed: Number(e.amount), paid: Number(e.amount) }))
+    ...exps.data.filter((e) => inRange(e.spent_on)).map((e) => ({ d: e.spent_on, k: 'e' + e.id, type: `Expense · ${e.category}`, ref: '', text: [e.description, e.clients?.name && `for ${e.clients.name}`, e.method, e.paid_by && `paid by ${member(e.paid_by)?.full_name || 'team member'}${e.reimbursement_id ? ' (repaid)' : ' (repayment pending)'}`].filter(Boolean).join(' · '), billed: Number(e.amount), paid: Number(e.amount) }))
   ].sort((x, y) => x.d.localeCompare(y.d) || (x.billed ? -1 : 1))
   let bal = opening
   const rows = lines.map((l) => ({ ...l, bal: (bal += l.billed - l.paid) }))

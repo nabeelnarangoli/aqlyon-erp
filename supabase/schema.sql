@@ -1070,6 +1070,67 @@ create trigger trg_expense_payee before insert or update of supplier_id, vendor 
 -- link expenses entered before payees existed (safe to re-run)
 update public.expenses set vendor = vendor where supplier_id is null and nullif(trim(vendor), '') is not null;
 
+-- ---------------------------------------------------------------------
+-- 10c. OUT-OF-POCKET PAYMENTS & REPAYMENTS
+--   A founder / staff member pays a company cost from their own account
+--   (expenses.paid_by = that person). It is a company expense straight away,
+--   but stays "payable to <person>" until the company repays them
+--   (a reimbursements row, linked from each expense it settles).
+-- ---------------------------------------------------------------------
+create table if not exists public.reimbursements (
+  id          uuid primary key default gen_random_uuid(),
+  person_id   uuid not null references public.profiles(id) on delete restrict,
+  paid_on     date not null default current_date,
+  amount      numeric(12,2) not null check (amount > 0),
+  method      text not null default 'Bank Transfer' check (method in ('Cash','UPI','Bank Transfer','Cheque','Card','Other')),
+  reference   text,
+  note        text,
+  created_by  uuid references public.profiles(id) on delete set null default auth.uid(),
+  created_at  timestamptz not null default now()
+);
+create index if not exists idx_reimb_person on public.reimbursements(person_id, paid_on);
+alter table public.expenses add column if not exists paid_by uuid references public.profiles(id) on delete restrict;          -- null = company account
+alter table public.expenses add column if not exists reimbursement_id uuid references public.reimbursements(id) on delete set null;
+create index if not exists idx_exp_paid_by on public.expenses(paid_by) where paid_by is not null;
+create index if not exists idx_exp_reimb on public.expenses(reimbursement_id);
+
+create or replace function public.expense_reimb_guard() returns trigger language plpgsql as $$
+begin
+  if tg_op = 'DELETE' then
+    if old.reimbursement_id is not null then raise exception 'This expense has already been repaid. Undo the repayment first.'; end if;
+    return old;
+  end if;
+  if new.paid_by is null then new.reimbursement_id := null; end if;
+  if tg_op = 'UPDATE' and old.reimbursement_id is not null and new.reimbursement_id is not distinct from old.reimbursement_id
+     and (new.amount <> old.amount or new.paid_by is distinct from old.paid_by) then
+    raise exception 'This expense has already been repaid. Undo the repayment first to change the amount or who paid.';
+  end if;
+  return new;
+end $$;
+drop trigger if exists trg_expense_reimb_guard on public.expenses;
+create trigger trg_expense_reimb_guard before insert or update or delete on public.expenses
+  for each row execute function public.expense_reimb_guard();
+
+-- repay selected out-of-pocket expenses to one person in a single payment
+create or replace function public.repay_expenses(p_person uuid, p_expense_ids uuid[], p_paid_on date default current_date,
+  p_method text default 'Bank Transfer', p_reference text default null, p_note text default null)
+returns uuid language plpgsql security definer set search_path = public as $$
+declare n int; tot numeric; rid uuid;
+begin
+  if not public.has_perm('expenses.manage', 'payments.manage') then raise exception 'Not allowed'; end if;
+  select count(*), coalesce(sum(amount), 0) into n, tot from public.expenses
+   where id = any(p_expense_ids) and paid_by = p_person and reimbursement_id is null;
+  if n = 0 or n <> coalesce(array_length(p_expense_ids, 1), 0) then
+    raise exception 'Some of the selected expenses are not payable to this person (already repaid or paid by someone else).';
+  end if;
+  insert into public.reimbursements(person_id, paid_on, amount, method, reference, note)
+  values (p_person, coalesce(p_paid_on, current_date), tot, coalesce(p_method, 'Bank Transfer'), nullif(p_reference, ''), nullif(p_note, ''))
+  returning id into rid;
+  update public.expenses set reimbursement_id = rid where id = any(p_expense_ids);
+  return rid;
+end $$;
+grant execute on function public.repay_expenses(uuid, uuid[], date, text, text, text) to authenticated;
+
 -- every money movement in one place (in = client payments, out = supplier payments + expenses)
 create or replace view public.v_money_movements with (security_invoker = true) as
 select p.id, p.paid_on as on_date, 'in'::text as direction, 'Client payment'::text as kind, p.amount, p.method, p.reference, p.note,
@@ -1083,7 +1144,12 @@ from public.supplier_payments sp join public.suppliers s on s.id = sp.supplier_i
 union all
 select e.id, e.spent_on, 'out', 'Expense · ' || e.category, e.amount, e.method, e.vendor, e.description,
        e.client_id, c.name, null, null, null, null, null, null
-from public.expenses e left join public.clients c on c.id = e.client_id;
+from public.expenses e left join public.clients c on c.id = e.client_id
+where e.paid_by is null   -- paid from a founder's / staff member's own account: cash leaves only when repaid
+union all
+select r.id, r.paid_on, 'out', 'Repaid to ' || coalesce(pr.full_name, 'team member'), r.amount, r.method, r.reference, r.note,
+       null, null, null, null, null, null, null, null
+from public.reimbursements r left join public.profiles pr on pr.id = r.person_id;
 
 -- ---------------------------------------------------------------------
 -- 11. CLIENT APPROVAL PORTAL (public, token based, no login)
@@ -1182,7 +1248,7 @@ do $$ declare t text; begin
   foreach t in array array['roles','staff_pay','profiles','settings','services','leads','clients','packages','interactions','projects',
     'design_tasks','task_proofs','task_comments','time_logs','queries','query_replies','content_posts','approval_links',
     'quotations','invoices','payments','expenses','notifications','activity_log',
-    'suppliers','supplier_bills','supplier_bill_allocations','supplier_payments'] loop
+    'suppliers','supplier_bills','supplier_bill_allocations','supplier_payments','reimbursements'] loop
     execute format('alter table public.%I enable row level security', t);
   end loop;
 end $$;
@@ -1293,7 +1359,9 @@ create policy p_inv_rw   on public.invoices for all to authenticated using (publ
 create policy p_inv_paid on public.invoices for update to authenticated using (public.has_perm('payments.manage'));  -- mark sent when recording a payment
 create policy p_pay_read on public.payments for select to authenticated using (public.has_perm('payments.manage', 'invoices.view', 'invoices.manage', 'reports.finance'));
 create policy p_pay_rw   on public.payments for all to authenticated using (public.has_perm('payments.manage')) with check (public.has_perm('payments.manage'));
-create policy p_exp_read on public.expenses for select to authenticated using (public.has_perm('expenses.manage', 'payments.manage', 'reports.finance', 'reports.clients'));
+create policy p_exp_read on public.expenses for select to authenticated using (public.has_perm('expenses.manage', 'payments.manage', 'reports.finance', 'reports.clients') or paid_by = auth.uid());
+create policy p_reimb_read on public.reimbursements for select to authenticated using (public.has_perm('expenses.manage', 'payments.manage', 'reports.finance') or person_id = auth.uid());
+create policy p_reimb_rw   on public.reimbursements for all to authenticated using (public.has_perm('expenses.manage', 'payments.manage')) with check (public.has_perm('expenses.manage', 'payments.manage'));
 create policy p_exp_rw   on public.expenses for all to authenticated using (public.has_perm('expenses.manage')) with check (public.has_perm('expenses.manage'));
 
 -- suppliers & work orders

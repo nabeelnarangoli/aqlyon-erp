@@ -3,7 +3,7 @@ import { DEFAULT_ROLES } from './permissions'
 // database triggers/RPCs from supabase/schema.sql, on sample data kept in localStorage.
 // Only used when the app is built with VITE_DEMO=1.
 
-const KEY = 'aqlyon-erp-demo-v4'
+const KEY = 'aqlyon-erp-demo-v5'
 const SKEY = 'aqlyon-erp-demo-session'
 const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : 'id-' + Math.random().toString(36).slice(2) + Date.now().toString(36))
 const nowISO = () => new Date().toISOString()
@@ -37,7 +37,7 @@ const READ = {
   packages: ['packages.view', 'packages.manage', 'invoices.manage'], projects: ['projects.view', 'projects.manage', 'tasks.view', 'tasks.work', 'tasks.manage'],
   content_posts: ['calendar.view', 'calendar.manage'], approval_links: ['calendar.manage', 'clients.manage'],
   quotations: ['quotations.view', 'quotations.manage'], invoices: ['invoices.view', 'invoices.manage', 'payments.manage'], v_invoice_status: ['invoices.view', 'invoices.manage', 'payments.manage'],
-  payments: ['payments.manage', 'invoices.view', 'invoices.manage', 'reports.finance'], expenses: ['expenses.manage', 'payments.manage', 'reports.finance', 'reports.clients'],
+  payments: ['payments.manage', 'invoices.view', 'invoices.manage', 'reports.finance'], expenses: ['expenses.manage', 'payments.manage', 'reports.finance', 'reports.clients'], reimbursements: ['expenses.manage', 'payments.manage', 'reports.finance'],
   suppliers: ['suppliers.view', 'suppliers.manage', 'suppliers.pay', 'expenses.manage', 'payments.manage', 'reports.finance'], supplier_bills: ['suppliers.view', 'suppliers.manage', 'suppliers.pay', 'reports.finance', 'reports.clients'],
   supplier_bill_allocations: ['suppliers.view', 'suppliers.manage', 'suppliers.pay', 'reports.clients', 'invoices.view'],
   supplier_payments: ['suppliers.view', 'suppliers.pay', 'payments.manage', 'reports.finance', 'invoices.view'],
@@ -46,7 +46,7 @@ const READ = {
 const WRITE = {
   leads: ['leads.manage'], interactions: ['leads.manage', 'clients.manage'], clients: ['clients.manage', 'leads.manage'], packages: ['packages.manage'],
   projects: ['projects.manage'], design_tasks: ['tasks.manage', 'tasks.review', 'tasks.work'], content_posts: ['calendar.manage'], approval_links: ['calendar.manage', 'clients.manage'],
-  quotations: ['quotations.manage'], invoices: ['invoices.manage', 'payments.manage'], payments: ['payments.manage'], expenses: ['expenses.manage'],
+  quotations: ['quotations.manage'], invoices: ['invoices.manage', 'payments.manage'], payments: ['payments.manage'], expenses: ['expenses.manage'], reimbursements: ['expenses.manage', 'payments.manage'],
   suppliers: ['suppliers.manage', 'expenses.manage'], supplier_bills: ['suppliers.manage'], supplier_bill_allocations: ['suppliers.manage'], supplier_payments: ['suppliers.pay'],
   roles: ['team.manage'], staff_pay: ['team.manage'], settings: ['settings.manage'], services: ['settings.manage', 'quotations.manage', 'invoices.manage']
 }
@@ -73,6 +73,7 @@ const DEFAULTS = {
   invoices: () => ({ issue_date: iso(new Date()), due_date: day(7), items: [], discount: 0, amount_paid: 0, status: 'draft', created_by: uid() }),
   payments: () => ({ paid_on: iso(new Date()), method: 'UPI', created_by: uid() }),
   expenses: () => ({ spent_on: iso(new Date()), category: 'Office Supplies', method: 'UPI', rebillable: false, recurring: false, created_by: uid() }),
+  reimbursements: () => ({ paid_on: iso(new Date()), method: 'Bank Transfer', created_by: uid() }),
   notifications: () => ({ read: false }),
   activity_log: () => ({ actor_id: uid() }),
   services: () => ({ category: 'Design', unit: 'per item', rate: 0, active: true }),
@@ -366,6 +367,7 @@ class Query {
         for (const r of rows) {
           const old = { ...r }
           guardDesigner(t, old, { ...r, ...this.payload })
+          if (t === 'expenses' && old.reimbursement_id && ((this.payload.amount !== undefined && Number(this.payload.amount) !== Number(old.amount)) || ('paid_by' in this.payload && (this.payload.paid_by || null) !== (old.paid_by || null)))) throw new Error('This expense has already been repaid. Undo the repayment first to change the amount or who paid.')
           Object.assign(r, this.payload)
           afterUpdate(t, old, r)
         }
@@ -378,7 +380,9 @@ class Query {
           if (T('roles').find((r) => r.id === id)?.key === 'admin') throw new Error('The Administrator role cannot be deleted')
           if (T('profiles').some((p) => p.role_id === id)) throw new Error('Move the users on this role to another role before deleting it')
         }
+        if (t === 'expenses' && T(t).some((r) => kill.has(r.id) && r.reimbursement_id)) throw new Error('This expense has already been repaid. Undo the repayment first.')
         db[t] = T(t).filter((r) => !kill.has(r.id))
+        if (t === 'reimbursements') T('expenses').forEach((e) => { if (kill.has(e.reimbursement_id)) e.reimbursement_id = null })
         if (t === 'design_tasks') { db.task_proofs = T('task_proofs').filter((p) => !kill.has(p.task_id)); db.task_comments = T('task_comments').filter((p) => !kill.has(p.task_id)) }
         if (t === 'invoices') db.payments = T('payments').filter((p) => !kill.has(p.invoice_id))
         if (t === 'payments') [...new Set(T('invoices').map((i) => i.id))].forEach(syncInvoice)
@@ -398,6 +402,16 @@ function rpc(name, a) {
   if (!db) load()
   try {
     if (name === 'staff_cost_rates') return { data: hasPerm('team.manage', 'reports.clients', 'reports.team') ? T('staff_pay').map((x) => ({ user_id: x.user_id, cost_per_hour: x.cost_per_hour })) : [], error: null }
+    if (name === 'repay_expenses') {
+      if (!hasPerm('expenses.manage', 'payments.manage')) throw new Error('Not allowed')
+      const ids = a.p_expense_ids || []
+      const rows = T('expenses').filter((e) => ids.includes(e.id) && e.paid_by === a.p_person && !e.reimbursement_id)
+      if (!rows.length || rows.length !== ids.length) throw new Error('Some of the selected expenses are not payable to this person (already repaid or paid by someone else).')
+      const { data } = new Query('reimbursements').insert({ person_id: a.p_person, paid_on: a.p_paid_on || iso(new Date()), amount: rows.reduce((x, e) => x + Number(e.amount), 0), method: a.p_method || 'Bank Transfer', reference: a.p_reference || null, note: a.p_note || null }).exec()
+      const r = Array.isArray(data) ? data[0] : data
+      rows.forEach((e) => { e.reimbursement_id = r.id }); persist()
+      return { data: r.id, error: null }
+    }
     if (name === 'convert_lead') {
       const l = T('leads').find((x) => x.id === a.p_lead); if (!l) throw new Error('Lead not found')
       if (l.converted_client_id) return { data: l.converted_client_id, error: null }
@@ -624,6 +638,13 @@ function seed() {
     E({ spent_on: m, category: 'Software / Subscriptions', vendor: 'Adobe Creative Cloud', amount: 4230, method: 'Card' })
     E({ spent_on: m, category: 'Internet / Phone', vendor: 'KeralaVision', amount: 1180, method: 'UPI' })
   }
+  // paid by the founder from his own account; last month's Adobe already repaid
+  const adId = T('profiles').find((p) => T('roles').find((x) => x.id === p.role_id)?.key === 'admin')?.id
+  const fpPrev = E({ spent_on: day(-34), category: 'Software / Subscriptions', vendor: 'Canva Pro', amount: 3999, method: 'Card', recurring: false, paid_by: adId, description: 'Annual plan – paid from founder card' })
+  E({ spent_on: day(-6), category: 'Software / Subscriptions', vendor: 'Google Workspace', amount: 1840, method: 'Card', recurring: false, paid_by: adId, description: 'Paid from founder card' })
+  E({ spent_on: day(-2), category: 'Travel / Fuel', vendor: 'HP Petrol Pump', amount: 1200, method: 'UPI', recurring: false, paid_by: adId, description: 'Client visit – Kappad' })
+  const rb = ins('reimbursements', { person_id: adId, paid_on: day(-20), amount: 3999, method: 'Bank Transfer', reference: 'NEFT-5521', note: 'Repaid Canva' })
+  T('expenses').find((e) => e.id === fpPrev.id).reimbursement_id = rb.id
   E({ spent_on: day(-4), category: 'Stock Images / Assets', vendor: 'Envato Elements', amount: 1400, method: 'Card', recurring: false })
   E({ spent_on: day(-3), category: 'Ad Spend (Client)', vendor: 'Meta Ads', amount: 6000, method: 'Card', client_id: c2.id, rebillable: true, recurring: false })
   // Outsourced logo for Kappad Beach Resort: invoice 20K, 10K advance; supplier 5K paid 3K + 2K; client pays balance 10K

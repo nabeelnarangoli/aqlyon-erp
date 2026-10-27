@@ -103,6 +103,18 @@ Marketer: Mark delivered
 
 Every expense is paid to a payee chosen from **Suppliers & payees** (press **+** to add a new one — landlord, KSEB, Adobe, staff…). Click any payee name — in Expenses, Payments & cash flow, or Reports → Spend by payee — to open their **account statement**: every expense, work order and payment with an opening balance, running balance owed and CSV export.
 
+## Paid by a founder / staff, repaid later
+
+When someone pays a company cost from their own account (e.g. the Adobe subscription on the founder's card):
+
+1. **Expenses → Add expense**, and under **Paid from** choose that person instead of *Company account*.
+   It counts as a company expense right away (P&L, payee statement) and shows **Payable to <name>**.
+2. When the company pays them back: **Expenses → Payable to founder / staff → Repay**, tick the expenses being repaid, enter date / method / reference.
+   The expenses turn **Paid by <name> · repaid**, and the repayment appears in **Payments & cash flow** as money out on that date.
+3. Made a mistake? Open **Repayments** and undo it; the expenses become payable again.
+
+Company cash only moves when the repayment is made, so the cash-flow figures stay true to the bank account.
+
 ## Updating the database later
 
 When a new version of `supabase/schema.sql` ships, run it again in the SQL Editor — it only adds or replaces what changed and keeps your data.

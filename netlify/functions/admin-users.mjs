@@ -5,7 +5,7 @@ const json = (status, body) => new Response(JSON.stringify(body), { status, head
 
 export default async (req) => {
   if (req.method !== 'POST') return json(405, { error: 'Method not allowed' })
-  const url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL
+  const url = (process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '').trim().replace(/\/(rest|auth)\/v1\/?$/, '').replace(/\/+$/, '')
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY
   if (!url || !key) return json(500, { error: 'Server is missing SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY environment variables' })
   const admin = createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } })

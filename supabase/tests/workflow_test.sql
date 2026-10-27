@@ -160,4 +160,25 @@ update roles set permissions='{}' where key='admin';
 select 'admin perms kept' t, permissions from roles where key='admin';
 do $$ begin begin update profiles set active=false where email='admin@aq.test'; raise exception 'FAIL last admin disabled';
   exception when raise_exception then if sqlerrm like 'FAIL%' then raise; end if; raise notice 'ok: %', sqlerrm; end; end $$;
+-- ===== FOUNDER PAID: expense from own account, payable until repaid, then cash out
+select pg_temp.as_user('00000000-0000-0000-0000-00000000000d');
+insert into expenses(category, vendor, amount, method, paid_by) values
+  ('Software / Subscriptions','Adobe',4230,'Card',(select id from profiles where email='admin@aq.test')),
+  ('Travel / Fuel','HP Petrol',800,'Cash',(select id from profiles where email='admin@aq.test'));
+select 'payable to founder (5030)' t, sum(amount) from expenses where paid_by is not null and reimbursement_id is null;
+select 'founder expense not in cash flow (0)' t, count(*) from v_money_movements where kind like 'Expense%' and amount in (4230,800);
+select repay_expenses((select id from profiles where email='admin@aq.test'), array(select id from expenses where vendor='Adobe'), current_date, 'Bank Transfer', 'NEFT-1', null) is not null as repaid;
+select 'still payable (800)' t, sum(amount) from expenses where paid_by is not null and reimbursement_id is null;
+select 'repayment in cash flow' t, kind, amount from v_money_movements where kind like 'Repaid%';
+do $$ begin begin perform repay_expenses((select id from profiles where email='admin@aq.test'), array(select id from expenses where vendor='Adobe'));
+  raise exception 'FAIL repaid twice'; exception when raise_exception then if sqlerrm like 'FAIL%' then raise; end if; raise notice 'ok: %', sqlerrm; end; end $$;
+do $$ begin begin delete from expenses where vendor='Adobe'; raise exception 'FAIL deleted repaid expense';
+  exception when raise_exception then if sqlerrm like 'FAIL%' then raise; end if; raise notice 'ok: %', sqlerrm; end; end $$;
+delete from reimbursements;
+select 'undo repayment → payable again (5030)' t, sum(amount) from expenses where paid_by is not null and reimbursement_id is null;
+reset role;
+select pg_temp.as_user('00000000-0000-0000-0000-00000000000c');
+do $$ begin begin perform repay_expenses((select id from profiles where email='admin@aq.test'), array(select id from expenses where vendor='Adobe'));
+  raise exception 'FAIL designer repaid'; exception when raise_exception then if sqlerrm like 'FAIL%' then raise; end if; raise notice 'ok: %', sqlerrm; end; end $$;
+reset role;
 select 'ALL TESTS PASSED' as result;

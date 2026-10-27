@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Plus, Download, Wallet, ArrowDownLeft, ArrowUpRight, Scale } from 'lucide-react'
 import { supabase, q } from '../../lib/supabase'
+import { useAuth } from '../../lib/auth'
 import { useData, useLocal } from '../../lib/hooks'
 import { PAYMENT_METHODS } from '../../lib/constants'
 import { money, money2, date, monthStart, monthEnd, downloadCSV } from '../../lib/format'
@@ -17,14 +18,17 @@ export default function Payments() {
   const [client, setClient] = useState('')
   const [adding, setAdding] = useState(false)
   const [bill, setBill] = useState(null)
+  const { member } = useAuth()
   const { data, loading, reload } = useData(async () => {
-    const [inc, out, exp] = await Promise.all([
+    const [inc, out, exp, reimb] = await Promise.all([
       q(supabase.from('payments').select('*, invoices(number), clients(name)').gte('paid_on', from).lte('paid_on', to).order('paid_on', { ascending: false })),
       q(supabase.from('supplier_payments').select('*, suppliers(name), supplier_bills(id,number,title, supplier_bill_allocations(client_id, amount, clients(name)))').gte('paid_on', from).lte('paid_on', to).order('paid_on', { ascending: false })),
-      q(supabase.from('expenses').select('*, clients(name)').gte('spent_on', from).lte('spent_on', to).order('spent_on', { ascending: false }))
+      // costs paid from a founder's / staff member's own account leave company cash only when repaid
+      q(supabase.from('expenses').select('*, clients(name)').is('paid_by', null).gte('spent_on', from).lte('spent_on', to).order('spent_on', { ascending: false })),
+      q(supabase.from('reimbursements').select('*').gte('paid_on', from).lte('paid_on', to).order('paid_on', { ascending: false }))
     ])
-    return { inc, out, exp }
-  }, [from, to], { inc: [], out: [], exp: [] })
+    return { inc, out, exp, reimb }
+  }, [from, to], { inc: [], out: [], exp: [], reimb: [] })
 
   const custOf = (p) => (p.supplier_bills?.supplier_bill_allocations || []).map((a) => a.clients?.name).filter(Boolean).join(', ')
   const inc = useMemo(() => data.inc.filter((p) => (!method || p.method === method) && (!client || p.client_id === client)), [data.inc, method, client])
@@ -32,17 +36,19 @@ export default function Payments() {
   const exp = useMemo(() => data.exp.filter((e) => (!method || e.method === method) && (!client || e.client_id === client)), [data.exp, method, client])
   const tIn = inc.reduce((a, p) => a + Number(p.amount), 0)
   const tSup = out.reduce((a, p) => a + Number(p.amount), 0)
-  const tExp = exp.reduce((a, e) => a + Number(e.amount), 0)
+  const reimb = useMemo(() => data.reimb.filter((r) => (!method || r.method === method) && !client), [data.reimb, method, client])
+  const tExp = exp.reduce((a, e) => a + Number(e.amount), 0) + reimb.reduce((a, r) => a + Number(r.amount), 0)
 
   const ledger = useMemo(() => {
     const rows = [
       ...inc.map((p) => ({ id: p.id, d: p.paid_on, dir: 'in', kind: 'Customer payment', who: p.clients?.name, whoLink: p.client_id && `/clients/${p.client_id}`, ref: p.invoices?.number, refLink: p.invoice_id && `/finance/invoices/${p.invoice_id}`, method: p.method, note: p.reference, amt: Number(p.amount) })),
       ...out.map((p) => ({ id: p.id, d: p.paid_on, dir: 'out', kind: `Supplier · ${p.kind}`, who: p.suppliers?.name, whoLink: `/finance/suppliers/${p.supplier_id}`, forWho: custOf(p), ref: p.supplier_bills?.number, bill: p.supplier_bills?.id, method: p.method, note: p.reference, amt: Number(p.amount) })),
-      ...exp.map((e) => ({ id: e.id, d: e.spent_on, dir: 'out', kind: `Expense · ${e.category}`, who: e.vendor, whoLink: e.supplier_id && `/finance/suppliers/${e.supplier_id}`, forWho: e.clients?.name, method: e.method, note: e.description, amt: Number(e.amount) }))
+      ...exp.map((e) => ({ id: e.id, d: e.spent_on, dir: 'out', kind: `Expense · ${e.category}`, who: e.vendor, whoLink: e.supplier_id && `/finance/suppliers/${e.supplier_id}`, forWho: e.clients?.name, method: e.method, note: e.description, amt: Number(e.amount) })),
+      ...reimb.map((r) => ({ id: r.id, d: r.paid_on, dir: 'out', kind: 'Repaid to founder / staff', who: member(r.person_id)?.full_name || 'Team member', whoLink: '/finance/expenses', method: r.method, note: r.reference || r.note, amt: Number(r.amount) }))
     ].sort((a, b) => a.d.localeCompare(b.d) || (a.dir === 'in' ? -1 : 1))
     let bal = 0
     return rows.map((r) => ({ ...r, bal: (bal += r.dir === 'in' ? r.amt : -r.amt) })).reverse()
-  }, [inc, out, exp])
+  }, [inc, out, exp, reimb, member])
 
   const csv = () => downloadCSV(`cash-flow-${from}-to-${to}.csv`, [...ledger].reverse().map((r) => ({ date: r.d, type: r.kind, party: r.who, for_customer: r.forWho || '', reference: r.ref || '', method: r.method, money_in: r.dir === 'in' ? r.amt : '', money_out: r.dir === 'out' ? r.amt : '', running_balance: r.bal })))
 
@@ -64,7 +70,7 @@ export default function Payments() {
       <div className="stats">
         <Stat label="Money in" value={money(tIn)} sub={`${inc.length} customer payments`} icon={ArrowDownLeft} onClick={() => setTab('in')} />
         <Stat label="Paid to suppliers" value={money(tSup)} sub={`${out.length} payments`} icon={ArrowUpRight} tone="orange" onClick={() => setTab('out')} />
-        <Stat label="Other expenses" value={money(tExp)} sub={`${exp.length} entries`} icon={Wallet} tone="red" />
+        <Stat label="Other expenses" value={money(tExp)} sub={`${exp.length} entries${reimb.length ? ` · ${reimb.length} repayments` : ''}`} icon={Wallet} tone="red" />
         <Stat label="Net cash flow" value={money(tIn - tSup - tExp)} icon={Scale} tone={tIn - tSup - tExp >= 0 ? 'teal' : 'red'} onClick={() => setTab('ledger')} />
       </div>
       <Tabs value={tab} onChange={setTab} tabs={[{ id: 'ledger', label: 'All movements', count: ledger.length }, { id: 'in', label: 'Received from customers', count: inc.length }, { id: 'out', label: 'Paid to suppliers', count: out.length }]} />

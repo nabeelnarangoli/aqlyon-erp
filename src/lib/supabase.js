@@ -2,7 +2,8 @@ import { createClient } from '@supabase/supabase-js'
 import { demoClient, demoApi, demoFileUrls } from './demo'
 
 export const DEMO = import.meta.env.VITE_DEMO === '1'
-const url = import.meta.env.VITE_SUPABASE_URL
+// accept the URL however it was pasted ("…supabase.co/rest/v1/", trailing slash, spaces)
+const url = (import.meta.env.VITE_SUPABASE_URL || '').trim().replace(/\/(rest|auth)\/v1\/?$/, '').replace(/\/+$/, '')
 const key = import.meta.env.VITE_SUPABASE_ANON_KEY
 
 export const configured = DEMO || Boolean(url && key && !url.includes('YOUR-PROJECT'))
