@@ -11,6 +11,7 @@ import {
   PageHeader, Button, Badge, Stat, Card, Modal, Field, Input, Select, Textarea, ClientSelect, MemberSelect, SearchInput, Loading, Empty, IconBtn, Tabs,
   useAction, useForm, useToast, useClients
 } from '../../components/ui'
+import DateRange from '../../components/DateRange'
 
 export const SUPPLIER_CATEGORIES = ['Freelance Designer', 'Printing Press', 'Videographer', 'Photographer', 'Video Editor', 'Developer', 'Content Writer',
   'Ad Agency', 'Ad Platform', 'Influencer', 'Signage / Fabrication', 'Landlord', 'Utility', 'Software / Subscription', 'Staff', 'Shop / Store', 'Bank / Government', 'Other']
@@ -149,9 +150,7 @@ function SupplierDetail({ id, onBack }) {
       {tab === 'statement' && (
         <>
           <div className="filters">
-            <Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} style={{ width: 160 }} />
-            <span className="muted">to</span>
-            <Input type="date" value={to} onChange={(e) => setTo(e.target.value)} style={{ width: 160 }} />
+            <DateRange from={from} to={to} onChange={(a, b) => { setFrom(a); setTo(b) }} />
             <div className="grow" />
             <Button variant="outline" icon={Download} onClick={csv}>Export statement</Button>
           </div>

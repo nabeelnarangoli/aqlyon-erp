@@ -7,19 +7,21 @@ import { QUOTE_STATUS } from '../../lib/constants'
 import { money, date, daysFrom } from '../../lib/format'
 import { PageHeader, Button, Badge, StatusBadge, Stat, Select, SearchInput, Loading, Empty, Member, DocActions } from '../../components/ui'
 import DocEditor from './DocEditor'
+import DateRange, { presetRange } from '../../components/DateRange'
 
 export default function Quotations() {
   const nav = useNavigate()
   const [params, setParams] = useSearchParams()
   const [status, setStatus] = useState('')
   const [search, setSearch] = useState('')
+  const [[from, to], setRange] = useState(() => presetRange('all'))
   const [editing, setEditing] = useState(null)
   const { data, loading } = useData(() => q(supabase.from('quotations').select('*, clients(name), leads(name, company)').order('issue_date', { ascending: false })), [], [])
   useEffect(() => {
     if (params.get('new')) { setEditing({ lead_id: params.get('lead') || null, client_id: params.get('client') || '' }); setParams({}, { replace: true }) }
   }, [params, setParams])
   const who = (x) => x.clients?.name || x.leads?.company || x.leads?.name || (x.bill_to || '').split('\n')[0] || '—'
-  const rows = useMemo(() => data.filter((x) => (!status || x.status === status) && (!search || [x.number, who(x)].some((v) => v?.toLowerCase().includes(search.toLowerCase())))), [data, status, search])
+  const rows = useMemo(() => data.filter((x) => x.issue_date >= from && x.issue_date <= to && (!status || x.status === status) && (!search || [x.number, who(x)].some((v) => v?.toLowerCase().includes(search.toLowerCase())))), [data, status, search, from, to])
   const open = data.filter((x) => x.status === 'sent')
   const decided = data.filter((x) => ['accepted', 'rejected'].includes(x.status))
   const accepted = data.filter((x) => x.status === 'accepted')
@@ -33,6 +35,7 @@ export default function Quotations() {
       </div>
       <div className="filters">
         <SearchInput value={search} onChange={setSearch} />
+        <DateRange from={from} to={to} onChange={(a, b) => setRange([a, b])} />
         <Select options={QUOTE_STATUS} value={status} onChange={(v) => setStatus(v || '')} placeholder="All statuses" />
       </div>
       {loading ? <Loading /> : rows.length === 0 ? <Empty icon={FileSignature} title="No quotations yet" /> : (

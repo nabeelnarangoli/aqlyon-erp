@@ -11,6 +11,7 @@ import {
   useAction, useForm, useToast
 } from '../../components/ui'
 import DocEditor from './DocEditor'
+import DateRange, { presetRange } from '../../components/DateRange'
 
 export default function Invoices() {
   const { has } = useAuth()
@@ -20,6 +21,7 @@ export default function Invoices() {
   const [status, setStatus] = useState('')
   const [client, setClient] = useState('')
   const [search, setSearch] = useState('')
+  const [[from, to], setRange] = useState(() => presetRange('all'))
   const [editing, setEditing] = useState(null)
   const [paying, setPaying] = useState(null)
   const [busy, run] = useAction()
@@ -31,11 +33,12 @@ export default function Invoices() {
   }, [params, setParams])
 
   const rows = useMemo(() => data.filter((i) => {
+    if (i.issue_date < from || i.issue_date > to) return false
     if (client && i.client_id !== client) return false
     if (status === 'overdue') { if (!i.overdue) return false } else if (status === 'unpaid') { if (!['sent', 'partial'].includes(i.status)) return false } else if (status && i.status !== status) return false
     if (search && ![i.number, i.client_name].some((v) => v?.toLowerCase().includes(search.toLowerCase()))) return false
     return true
-  }), [data, client, status, search])
+  }), [data, client, status, search, from, to])
 
   const ms = monthStart(), me = monthEnd()
   const live = data.filter((i) => i.status !== 'cancelled')
@@ -69,6 +72,7 @@ export default function Invoices() {
       </div>
       <div className="filters">
         <SearchInput value={search} onChange={setSearch} placeholder="Invoice no. or client…" />
+        <DateRange from={from} to={to} onChange={(a, b) => setRange([a, b])} />
         <ClientSelect value={client} onChange={(v) => setClient(v || '')} placeholder="All clients" includeInactive />
         <Select options={[{ id: 'unpaid', label: 'Unpaid (sent + partial)' }, { id: 'overdue', label: 'Overdue' }, ...INVOICE_STATUS]} value={status} onChange={(v) => setStatus(v || '')} placeholder="All statuses" />
       </div>

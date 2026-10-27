@@ -11,6 +11,7 @@ import { LEAD_STAGES, LEAD_SOURCES } from '../../lib/constants'
 import { money, compact, n, pct, hours, toISO, daysFrom, downloadCSV, monthStart } from '../../lib/format'
 import { PageHeader, Tabs, Card, Stat, Loading, Empty, Button, Input, Badge, Progress, Avatar } from '../../components/ui'
 import { monthly } from '../crm/Clients'
+import DateRange from '../../components/DateRange'
 
 const COLORS = ['#1ba76a', '#2b1416', '#2fb383', '#c98a0c', '#2f6fd6', '#7a4fd1', '#e5732b', '#0f9a9a', '#d64545', '#8f8787']
 const monthsBetween = (from, to) => {
@@ -34,21 +35,13 @@ export default function Reports() {
   const y = new Date()
   const [from, setFrom] = useState(toISO(new Date(y.getFullYear(), y.getMonth() - 5, 1)))
   const [to, setTo] = useState(toISO(new Date(y.getFullYear(), y.getMonth() + 1, 0)))
-  const presets = [
-    ['This month', monthStart(), toISO(new Date(y.getFullYear(), y.getMonth() + 1, 0))],
-    ['Last 6 months', toISO(new Date(y.getFullYear(), y.getMonth() - 5, 1)), toISO(new Date(y.getFullYear(), y.getMonth() + 1, 0))],
-    ['Financial year', toISO(new Date(y.getMonth() >= 3 ? y.getFullYear() : y.getFullYear() - 1, 3, 1)), toISO(new Date(y.getMonth() >= 3 ? y.getFullYear() + 1 : y.getFullYear(), 2, 31))]
-  ]
   return (
     <>
       <PageHeader title="Reports" subtitle="Know which clients, services and people make the agency money."
         actions={!DEMO && <Button variant="outline" icon={Printer} onClick={() => window.print()}>Print</Button>} />
       {tab !== 'receivables' && (
         <div className="filters no-print">
-          <Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} style={{ width: 160 }} />
-          <span className="muted">to</span>
-          <Input type="date" value={to} onChange={(e) => setTo(e.target.value)} style={{ width: 160 }} />
-          {presets.map(([l, a, b]) => <Button key={l} size="sm" variant={from === a && to === b ? 'soft' : 'ghost'} onClick={() => { setFrom(a); setTo(b) }}>{l}</Button>)}
+          <DateRange from={from} to={to} onChange={(a, b) => { setFrom(a); setTo(b) }} />
         </div>
       )}
       <Tabs tabs={tabs} value={tab} onChange={setTab} />

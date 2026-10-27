@@ -12,6 +12,7 @@ import {
   PageHeader, Button, Stat, Modal, Field, Input, Select, Textarea, ClientSelect, MemberSelect, Loading, Empty, Badge, IconBtn, Progress, Card,
   useAction, useForm, useToast
 } from '../../components/ui'
+import DateRange from '../../components/DateRange'
 
 export default function Expenses() {
   const [from, setFrom] = useState(monthStart())
@@ -67,9 +68,7 @@ export default function Expenses() {
           <Button icon={Plus} onClick={() => setEditing({})}>Add expense</Button>
         </>} />
       <div className="filters">
-        <Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} style={{ width: 160 }} />
-        <span className="muted">to</span>
-        <Input type="date" value={to} onChange={(e) => setTo(e.target.value)} style={{ width: 160 }} />
+        <DateRange from={from} to={to} onChange={(a, b) => { setFrom(a); setTo(b) }} />
         <Select options={EXPENSE_CATEGORIES} value={cat} onChange={(v) => setCat(v || '')} placeholder="All categories" />
         <Select options={[{ id: 'company', label: 'Paid from company account' }, { id: 'own', label: 'Paid by founder / staff' }, { id: 'payable', label: 'Still payable to founder / staff' }]} value={show} onChange={(v) => setShow(v || '')} placeholder="All payments" />
       </div>

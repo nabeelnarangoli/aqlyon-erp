@@ -467,3 +467,13 @@ body.pdf-capture .doc { box-shadow: none; border: 0; }
 .doc .sign-grid div { border-bottom: 1px solid #bbb; padding: 18px 0 4px; font-size: 12px; color: #666; }
 @media (max-width: 720px) { .doc .terms-cols { columns: 1; } }
 @media print { .doc .page-break { break-before: page; } }
+/* period picker */
+.daterange { position: relative; }
+.daterange-btn { display: flex; align-items: center; gap: 8px; min-width: 250px; max-width: 360px; cursor: pointer; text-align: left; background: var(--surface); }
+.daterange-pop { position: absolute; top: calc(100% + 6px); left: 0; z-index: 60; display: flex; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; box-shadow: 0 14px 40px rgba(0,0,0,.14); overflow: hidden; }
+.daterange-list { display: flex; flex-direction: column; padding: 6px; min-width: 230px; max-height: 420px; overflow: auto; border-right: 1px solid var(--line); }
+.daterange-list button { background: none; border: 0; text-align: left; padding: 7px 10px; border-radius: 8px; cursor: pointer; font-size: 13px; color: var(--ink); }
+.daterange-list button:hover { background: var(--surface-2); }
+.daterange-list button.on { background: var(--green-50); color: var(--green-d); font-weight: 600; }
+.daterange-custom { display: flex; flex-direction: column; gap: 8px; padding: 12px; width: 200px; }
+@media (max-width: 640px) { .daterange-pop { flex-direction: column; } .daterange-list { border-right: 0; border-bottom: 1px solid var(--line); max-height: 240px; } .daterange-btn { min-width: 0; } }
