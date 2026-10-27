@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { SupplierModal } from './Suppliers'
+import { SupplierModal, WorkOrderView } from './Suppliers'
 import { Plus, Download, Receipt, Paperclip, Trash2, Repeat, HandCoins, Undo2 } from 'lucide-react'
 import { useAuth } from '../../lib/auth'
 import { supabase, q, uploadFile, signedUrl } from '../../lib/supabase'
@@ -35,7 +35,17 @@ export default function Expenses() {
   }, [data], [])
   const owedBy = useMemo(() => Object.values(owed.data.reduce((a, e) => { a[e.paid_by] ||= { id: e.paid_by, total: 0, n: 0 }; a[e.paid_by].total += Number(e.amount); a[e.paid_by].n++; return a }, {})).sort((a, b) => b.total - a.total), [owed.data])
   const owedTotal = owedBy.reduce((a, x) => a + x.total, 0)
-  const rows = useMemo(() => data.filter((e) => (!cat || e.category === cat) && (!show || (show === 'payable' ? e.paid_by && !e.reimbursement_id : show === 'own' ? e.paid_by : !e.paid_by))), [data, cat, show])
+  // supplier payments made from someone's own account also sit in "payable to founder / staff"
+  const spOwn = useData(() => q(supabase.from('supplier_payments').select('*, suppliers(name), supplier_bills(id,number,title)').not('paid_by', 'is', null).gte('paid_on', from).lte('paid_on', to)), [from, to, data], [])
+  const spRows = useMemo(() => spOwn.data.map((p) => ({ id: 'sp' + p.id, sp: true, bill_id: p.bill_id, spent_on: p.paid_on, category: 'Supplier payment', vendor: p.suppliers?.name, supplier_id: p.supplier_id,
+    description: [p.supplier_bills?.number, p.supplier_bills?.title, p.kind].filter(Boolean).join(' · '), amount: p.amount, method: p.method, paid_by: p.paid_by, reimbursement_id: p.reimbursement_id })), [spOwn.data])
+  const rows = useMemo(() => {
+    const base = data.filter((e) => (!cat || e.category === cat) && (!show || (show === 'payable' ? e.paid_by && !e.reimbursement_id : show === 'own' ? e.paid_by : !e.paid_by)))
+    if (show !== 'own' && show !== 'payable') return base
+    const extra = spRows.filter((e) => (!cat || cat === 'Supplier payment') && (show === 'own' || !e.reimbursement_id))
+    return [...base, ...extra].sort((a, b) => b.spent_on.localeCompare(a.spent_on))
+  }, [data, cat, show, spRows])
+  const [order, setOrder] = useState(null)
   const total = rows.reduce((a, e) => a + Number(e.amount), 0)
   const byPayee = useMemo(() => Object.values(data.filter((e) => e.supplier_id).reduce((a, e) => {
     const k = e.supplier_id; a[k] ||= { id: k, name: e.vendor, total: 0, n: 0 }; a[k].total += Number(e.amount); a[k].n++; return a
@@ -84,13 +94,13 @@ export default function Expenses() {
             <div className="card table-wrap"><table className="table">
               <thead><tr><th>Date</th><th>Category</th><th>Details</th><th>Method</th><th className="num">Amount</th><th /></tr></thead>
               <tbody>{rows.map((e) => (
-                <tr key={e.id} className="click" onClick={() => setEditing(e)}>
+                <tr key={e.id} className="click" onClick={() => (e.sp ? setOrder(e.bill_id) : setEditing(e))}>
                   <td className="nowrap">{date(e.spent_on)}</td>
-                  <td><div>{e.category}</div>{e.recurring && <Badge tone="slate">Recurring</Badge>}</td>
+                  <td><div>{e.category}</div>{e.recurring && <Badge tone="slate">Recurring</Badge>}{e.sp && <Badge tone="orange">Work order</Badge>}</td>
                   <td><div className="cell-title">{e.supplier_id ? <Link to={`/finance/suppliers/${e.supplier_id}`} onClick={(ev) => ev.stopPropagation()}>{e.vendor}</Link> : e.vendor || e.description || '—'}</div><div className="cell-sub">{e.vendor && e.description}{e.clients?.name && ` · for ${e.clients.name}`}{e.rebillable && ' · re-billable'}</div></td>
                   <td>{e.method}{e.paid_by && <div style={{ marginTop: 4 }}><PaidByBadge e={e} name={member(e.paid_by)?.full_name} /></div>}</td>
                   <td className="num strong">{money2(e.amount)}</td>
-                  <td onClick={(ev) => ev.stopPropagation()} className="nowrap">{e.receipt_path && <IconBtn icon={Paperclip} size={14} title="Receipt" onClick={() => openReceipt(e)} />}<IconBtn icon={Trash2} size={14} title="Delete" onClick={() => del(e)} /></td>
+                  <td onClick={(ev) => ev.stopPropagation()} className="nowrap">{e.receipt_path && <IconBtn icon={Paperclip} size={14} title="Receipt" onClick={() => openReceipt(e)} />}{!e.sp && <IconBtn icon={Trash2} size={14} title="Delete" onClick={() => del(e)} />}</td>
                 </tr>))}</tbody>
               <tfoot><tr><td colSpan={4}>Total</td><td className="num">{money2(total)}</td><td /></tr></tfoot>
             </table></div>
@@ -123,6 +133,8 @@ export default function Expenses() {
         </Card>
         </div>
       </div>
+      {order && <WorkOrderView id={order} onClose={() => { setOrder(null); spOwn.reload(); owed.reload() }} />}
+      {!show && spRows.length > 0 && <p className="small faint mt">{spRows.length} supplier payment{spRows.length > 1 ? 's were' : ' was'} paid from a founder's / staff member's own account in this period — choose “Paid by founder / staff” above to see {spRows.length > 1 ? 'them' : 'it'} here.</p>}
       {repay && <RepayModal person={repay.person} onClose={() => setRepay(null)} onDone={() => { reload(); owed.reload() }} />}
       {editing && <ExpenseModal exp={editing} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); reload() }} />}
     </>
