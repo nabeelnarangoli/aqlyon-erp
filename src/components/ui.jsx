@@ -198,6 +198,20 @@ export function DocActions({ to }) {
   )
 }
 
+// who brought this customer: a team member, or someone outside the team (free-text name)
+export function SalesmanPicker({ id, name, onChange }) {
+  const { team } = useAuth()
+  const [other, setOther] = useState(!id && !!name)
+  const opts = [...team.filter((m) => m.active || m.id === id).map((m) => ({ id: m.id, label: m.full_name })), { id: '__other', label: 'Someone else (not a user)…' }]
+  return (
+    <div className="grid" style={{ gap: 6 }}>
+      <Select options={opts} value={other ? '__other' : id || ''} placeholder="Not recorded"
+        onChange={(v) => { if (v === '__other') { setOther(true); onChange(null, name || '') } else { setOther(false); onChange(v || null, null) } }} />
+      {other && <Input value={name || ''} onChange={(e) => onChange(null, e.target.value)} placeholder="Name of the person / agent who brought them" autoFocus />}
+    </div>
+  )
+}
+
 export function MemberSelect({ value, onChange, perm, placeholder = 'Unassigned' }) {
   const { team, memberHas } = useAuth()
   const opts = team.filter((m) => m.active && (!perm || memberHas(m, ...perm) || m.id === value)).map((m) => ({ id: m.id, label: m.full_name }))
@@ -234,15 +248,15 @@ export function ClientSelect({ value, onChange, placeholder = 'Select client…'
 export function NewCustomerModal({ onClose, onSaved }) {
   const { has } = useAuth()
   const canRegular = has('clients.manage', 'leads.manage')
-  const [f, set] = useForm({ type: 'walkin', name: '', phone: '', whatsapp: '', waSame: true, email: '', city: '', address: '', contact_person: '' })
+  const [f, set, setF] = useForm({ type: 'walkin', name: '', phone: '', whatsapp: '', waSame: true, email: '', city: '', address: '', contact_person: '', salesman_id: null, salesman_name: '' })
   const wa = f.waSame ? f.phone : f.whatsapp
   const [busy, run] = useAction()
   const save = (e) => { e.preventDefault(); e.stopPropagation(); run(async () => {   // stop: this form sits inside other forms (React events bubble through portals)
     if (!f.name.trim()) throw new Error('Enter the customer name')
     if (f.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(f.email.trim())) throw new Error('Check the email address')
-    const more = { whatsapp: wa?.trim() || null, email: f.email.trim() || null, city: f.city.trim() || null, address: f.address.trim() || null }
+    const more = { whatsapp: wa?.trim() || null, email: f.email.trim() || null, city: f.city.trim() || null, address: f.address.trim() || null, salesman_id: f.salesman_id || null, salesman_name: f.salesman_name?.trim() || null }
     const id = f.type === 'walkin'
-      ? await q(supabase.rpc('walkin_customer', { p_name: f.name.trim(), p_phone: f.phone || null, p_whatsapp: more.whatsapp, p_email: more.email, p_city: more.city, p_address: more.address }))
+      ? await q(supabase.rpc('walkin_customer', { p_name: f.name.trim(), p_phone: f.phone || null, p_whatsapp: more.whatsapp, p_email: more.email, p_city: more.city, p_address: more.address, p_salesman_id: more.salesman_id, p_salesman_name: more.salesman_name }))
       : (await q(supabase.from('clients').insert({ name: f.name.trim(), contact_person: f.contact_person || f.name.trim(), phone: f.phone || null, ...more, status: 'active', customer_type: 'regular' }).select('id').single())).id
     onSaved(id)
   }, 'Customer added') }
@@ -263,7 +277,8 @@ export function NewCustomerModal({ onClose, onSaved }) {
         </Field>
         <Field label="Email"><Input type="email" value={f.email} onChange={set('email')} placeholder="name@example.com" /></Field>
         <Field label="Location / area"><Input value={f.city} onChange={set('city')} placeholder="e.g. Koyilandy, Vadakara" /></Field>
-        <Field label="Address" span={2}><Textarea rows={2} value={f.address} onChange={set('address')} placeholder="Building, street, PIN — printed on the invoice" /></Field>
+        <Field label="Address"><Textarea rows={2} value={f.address} onChange={set('address')} placeholder="Building, street, PIN — printed on the invoice" /></Field>
+        <Field label="Salesman / brought by" hint="Who brought this customer"><SalesmanPicker id={f.salesman_id} name={f.salesman_name} onChange={(sid, sname) => setF((x) => ({ ...x, salesman_id: sid, salesman_name: sname }))} /></Field>
       </form>
     </Modal>
   )

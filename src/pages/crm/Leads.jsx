@@ -5,7 +5,7 @@ import { supabase, q } from '../../lib/supabase'
 import { useData, useLocal } from '../../lib/hooks'
 import { useAuth } from '../../lib/auth'
 import { LEAD_STAGES, LEAD_SOURCES, INDUSTRIES, SERVICE_TAGS, byId } from '../../lib/constants'
-import { money, compact, date, dueLabel, waLink, downloadCSV, ago } from '../../lib/format'
+import { money, compact, date, dueLabel, waLink, downloadCSV, ago, showMoney } from '../../lib/format'
 import {
   PageHeader, Button, Badge, StatusBadge, Member, Modal, Field, Input, Select, Textarea, Chips, MemberSelect,
   SearchInput, Loading, ErrorBox, Empty, Tabs, useAction, useForm, useToast, cx, invalidateClients
@@ -48,7 +48,7 @@ export default function Leads() {
   return (
     <>
       <PageHeader title="Leads & Pipeline"
-        subtitle={`${open.length} open · ${money(pipeline)} in pipeline · ${closed ? Math.round((won / closed) * 100) : 0}% win rate`}
+        subtitle={`${open.length} open · ${showMoney() ? `${money(pipeline)} in pipeline · ` : ''}${closed ? Math.round((won / closed) * 100) : 0}% win rate`}
         actions={<>
           <Button variant="outline" icon={Download} onClick={() => downloadCSV('leads.csv', rows.map((l) => ({ name: l.name, company: l.company, phone: l.phone, email: l.email, city: l.city, source: l.source, stage: l.stage, value: l.estimated_value, follow_up: l.next_follow_up })))}>Export</Button>
           <Button icon={Plus} onClick={() => setEditing({})}>New lead</Button>
@@ -81,7 +81,7 @@ function Board({ rows, onOpen, onMove }) {
           <div key={s.id} className={cx('lane', over === s.id && 'drop')}
             onDragOver={(e) => { e.preventDefault(); setOver(s.id) }} onDragLeave={() => setOver(null)}
             onDrop={(e) => { setOver(null); const id = e.dataTransfer.getData('id'); if (id) onMove(id, s.id) }}>
-            <div className="lane-head"><span><Badge tone={s.tone} dot>{s.label}</Badge> <span className="sum">{items.length}</span></span><span className="sum">{compact(total)}</span></div>
+            <div className="lane-head"><span><Badge tone={s.tone} dot>{s.label}</Badge> <span className="sum">{items.length}</span></span>{showMoney() && <span className="sum">{compact(total)}</span>}</div>
             {items.map((l) => <LeadCard key={l.id} l={l} onOpen={onOpen} />)}
           </div>
         )
@@ -101,7 +101,7 @@ function LeadCard({ l, onOpen }) {
       </div>
       <div className="meta">
         {l.source && <Badge tone="slate">{l.source}</Badge>}
-        {Number(l.estimated_value) > 0 && <b style={{ color: 'var(--ink)' }}>{money(l.estimated_value)}</b>}
+        {showMoney() && Number(l.estimated_value) > 0 && <b style={{ color: 'var(--ink)' }}>{money(l.estimated_value)}</b>}
       </div>
       <div className="foot">
         <Member id={l.owner_id} size={20} showName={false} fallback="" />
@@ -116,7 +116,7 @@ function LeadTable({ rows, onOpen }) {
   return (
     <div className="card table-wrap">
       <table className="table">
-        <thead><tr><th>Lead</th><th>Contact</th><th>Source</th><th>Stage</th><th className="num">Value</th><th>Owner</th><th>Follow-up</th></tr></thead>
+        <thead><tr><th>Lead</th><th>Contact</th><th>Source</th><th>Stage</th>{showMoney() && <th className="num">Value</th>}<th>Owner</th><th>Follow-up</th></tr></thead>
         <tbody>
           {rows.map((l) => (
             <tr key={l.id} className="click" onClick={() => onOpen(l)}>
@@ -124,7 +124,7 @@ function LeadTable({ rows, onOpen }) {
               <td><div>{l.name}</div><div className="cell-sub">{l.phone}</div></td>
               <td>{l.source}</td>
               <td><StatusBadge list={LEAD_STAGES} value={l.stage} /></td>
-              <td className="num">{money(l.estimated_value)}</td>
+              {showMoney() && <td className="num">{money(l.estimated_value)}</td>}
               <td><Member id={l.owner_id} size={22} /></td>
               <td>{l.next_follow_up ? <Badge tone={dueLabel(l.next_follow_up).tone}>{date(l.next_follow_up)}</Badge> : '—'}</td>
             </tr>
@@ -203,7 +203,7 @@ export function LeadModal({ lead, onClose, onSaved }) {
           <Field label="Industry"><Select options={INDUSTRIES} value={f.industry} onChange={set('industry')} /></Field>
           <Field label="Lead source"><Select options={LEAD_SOURCES} value={f.source} onChange={set('source')} /></Field>
           <Field label="Interested in" span={2}><Chips options={SERVICE_TAGS} value={f.services_interest || []} onChange={set('services_interest')} /></Field>
-          <Field label="Estimated monthly / deal value (₹)"><Input type="number" step="any" min="0" value={f.estimated_value} onChange={set('estimated_value')} /></Field>
+          {showMoney() && <Field label="Estimated monthly / deal value (₹)"><Input type="number" step="any" min="0" value={f.estimated_value} onChange={set('estimated_value')} /></Field>}
           <Field label="Temperature"><Select placeholder={false} options={[{ id: 'hot', label: '🔥 Hot' }, { id: 'warm', label: '☀️ Warm' }, { id: 'cold', label: '❄️ Cold' }]} value={f.temperature} onChange={set('temperature')} /></Field>
           <Field label="Stage"><Select placeholder={false} options={LEAD_STAGES} value={f.stage} onChange={set('stage')} /></Field>
           <Field label="Owner"><MemberSelect perm={['leads.manage', 'clients.manage']} value={f.owner_id} onChange={set('owner_id')} /></Field>

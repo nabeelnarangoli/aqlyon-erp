@@ -5,7 +5,7 @@ import { supabase, q } from '../../lib/supabase'
 import { useData } from '../../lib/hooks'
 import { useAuth } from '../../lib/auth'
 import { PROJECT_TYPES, PROJECT_STATUS } from '../../lib/constants'
-import { money, date, n } from '../../lib/format'
+import { money, date, n, showMoney } from '../../lib/format'
 import {
   PageHeader, Button, StatusBadge, Member, Modal, Field, Input, Select, Textarea, MemberSelect, ClientSelect, SearchInput,
   Loading, Empty, useAction, useForm, useToast
@@ -24,7 +24,7 @@ export default function Projects() {
   const leads = active.reduce((a, p) => a + Number(p.leads_generated || 0), 0)
   return (
     <>
-      <PageHeader title="Campaigns & Projects" subtitle={`${active.length} active · ${money(spend)} ad spend · ${n(leads)} leads generated (${leads ? money(spend / leads) : '—'} per lead)`}
+      <PageHeader title="Campaigns & Projects" subtitle={showMoney() ? `${active.length} active · ${money(spend)} ad spend · ${n(leads)} leads generated (${leads ? money(spend / leads) : '—'} per lead)` : `${active.length} active · ${n(leads)} leads generated`}
         actions={has('projects.manage') && <Button icon={Plus} onClick={() => setEditing({})}>New campaign</Button>} />
       <div className="filters">
         <SearchInput value={search} onChange={setSearch} />
@@ -32,15 +32,15 @@ export default function Projects() {
       </div>
       {loading ? <Loading /> : rows.length === 0 ? <Empty icon={Megaphone} title="No campaigns yet">Track ad campaigns, launches, shoots and branding projects with their budgets and results.</Empty> : (
         <div className="card table-wrap"><table className="table">
-          <thead><tr><th>Campaign</th><th>Client</th><th>Type</th><th>Status</th><th>Dates</th><th className="num">Fee</th><th className="num">Ad spend</th><th className="num">Reach</th><th className="num">Leads</th><th className="num">CPL</th><th>Owner</th></tr></thead>
+          <thead><tr><th>Campaign</th><th>Client</th><th>Type</th><th>Status</th><th>Dates</th>{showMoney() && <><th className="num">Fee</th><th className="num">Ad spend</th></>}<th className="num">Reach</th><th className="num">Leads</th>{showMoney() && <th className="num">CPL</th>}<th>Owner</th></tr></thead>
           <tbody>{rows.map((p) => (
             <tr key={p.id} className="click" onClick={() => setEditing(p)}>
               <td><div className="cell-title">{p.name}</div><div className="cell-sub">{p.platform || p.objective}</div></td>
               <td><Link to={`/clients/${p.client_id}`} onClick={(e) => e.stopPropagation()}>{p.clients?.name}</Link></td>
               <td>{p.type}</td><td><StatusBadge list={PROJECT_STATUS} value={p.status} /></td>
               <td className="nowrap small">{p.start_date ? date(p.start_date) : '—'} → {p.end_date ? date(p.end_date) : '—'}</td>
-              <td className="num">{money(p.budget)}</td><td className="num">{money(p.ad_spend)}</td><td className="num">{n(p.reach)}</td>
-              <td className="num">{n(p.leads_generated)}</td><td className="num">{p.leads_generated ? money(p.ad_spend / p.leads_generated) : '—'}</td>
+              {showMoney() && <><td className="num">{money(p.budget)}</td><td className="num">{money(p.ad_spend)}</td></>}<td className="num">{n(p.reach)}</td>
+              <td className="num">{n(p.leads_generated)}</td>{showMoney() && <td className="num">{p.leads_generated ? money(p.ad_spend / p.leads_generated) : '—'}</td>}
               <td><Member id={p.owner_id} size={22} showName={false} /></td>
             </tr>))}
           </tbody></table></div>
@@ -63,6 +63,7 @@ export function ProjectModal({ project, onClose, onSaved, readOnly }) {
       const p = { ...f }
       ;['id', 'created_at', 'clients'].forEach((k) => delete p[k])
       ;['budget', 'ad_spend', 'reach', 'impressions', 'clicks', 'leads_generated', 'conversions'].forEach((k) => (p[k] = Number(p[k] || 0)))
+      if (!showMoney()) { delete p.budget; delete p.ad_spend }
       p.start_date = p.start_date || null; p.end_date = p.end_date || null; p.owner_id = p.owner_id || null
       isNew ? await q(supabase.from('projects').insert(p)) : await q(supabase.from('projects').update(p).eq('id', project.id))
       onSaved()
@@ -87,14 +88,14 @@ export function ProjectModal({ project, onClose, onSaved, readOnly }) {
           <Field label="End"><Input type="date" value={f.end_date} onChange={set('end_date')} /></Field>
           <Field label="Owner"><MemberSelect perm={['leads.manage', 'clients.manage']} value={f.owner_id} onChange={set('owner_id')} /></Field>
           <Field label="Objective" span={3}><Input value={f.objective} onChange={set('objective')} placeholder="Leads, awareness, store visits, sales…" /></Field>
-          <Field label="Agency fee (₹)"><Input type="number" step="any" min="0" value={f.budget} onChange={set('budget')} /></Field>
-          <Field label="Ad spend (₹)"><Input type="number" step="any" min="0" value={f.ad_spend} onChange={set('ad_spend')} /></Field>
+          {showMoney() && <><Field label="Agency fee (₹)"><Input type="number" step="any" min="0" value={f.budget} onChange={set('budget')} /></Field>
+          <Field label="Ad spend (₹)"><Input type="number" step="any" min="0" value={f.ad_spend} onChange={set('ad_spend')} /></Field></>}
           <div />
           <div className="field span-3"><h3 className="mt">Results</h3></div>
           <Field label="Reach"><Input type="number" step="any" min="0" value={f.reach} onChange={set('reach')} /></Field>
           <Field label="Impressions"><Input type="number" step="any" min="0" value={f.impressions} onChange={set('impressions')} /></Field>
           <Field label="Clicks" hint={`CTR ${ctr}`}><Input type="number" step="any" min="0" value={f.clicks} onChange={set('clicks')} /></Field>
-          <Field label="Leads generated" hint={f.leads_generated > 0 ? `Cost per lead ${money(f.ad_spend / f.leads_generated)}` : ''}><Input type="number" step="any" min="0" value={f.leads_generated} onChange={set('leads_generated')} /></Field>
+          <Field label="Leads generated" hint={showMoney() && f.leads_generated > 0 ? `Cost per lead ${money(f.ad_spend / f.leads_generated)}` : ''}><Input type="number" step="any" min="0" value={f.leads_generated} onChange={set('leads_generated')} /></Field>
           <Field label="Conversions / sales"><Input type="number" step="any" min="0" value={f.conversions} onChange={set('conversions')} /></Field>
           <div />
           <Field label="Results notes" span={3}><Textarea value={f.results_notes} onChange={set('results_notes')} placeholder="What worked, best creative, learnings…" /></Field>

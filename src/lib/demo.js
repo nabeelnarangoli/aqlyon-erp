@@ -1,10 +1,10 @@
-import { DEFAULT_ROLES } from './permissions'
+import { DEFAULT_ROLES, grants } from './permissions'
 import { QUOTE_TERMS, PROPOSAL_INTRO, CLIENT_RESPONSIBILITIES, PROPOSAL_EXCLUSIONS, PROPOSAL_ACCEPTANCE, PROPOSAL_SERVICES } from './proposal'
 // In-browser demo backend: mimics the subset of supabase-js the app uses, plus the
 // database triggers/RPCs from supabase/schema.sql, on sample data kept in localStorage.
 // Only used when the app is built with VITE_DEMO=1.
 
-const KEY = 'aqlyon-erp-demo-v11'
+const KEY = 'aqlyon-erp-demo-v13'
 const SKEY = 'aqlyon-erp-demo-session'
 const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : 'id-' + Math.random().toString(36).slice(2) + Date.now().toString(36))
 const nowISO = () => new Date().toISOString()
@@ -30,7 +30,7 @@ export function resetDemo() { try { localStorage.removeItem(KEY) } catch { /* ig
 const T = (name) => (db[name] ||= [])
 const uid = () => currentUser?.id || null
 const permsOf = (id) => { const p = T('profiles').find((x) => x.id === id); return (p?.active && T('roles').find((r) => r.id === p.role_id)?.permissions) || [] }
-const hasPerm = (...want) => { const p = permsOf(uid()); return !currentUser ? true : p.includes('*') || want.some((w) => p.includes(w)) }
+const hasPerm = (...want) => (!currentUser ? true : grants(permsOf(uid()), ...want))
 const myRoleId = () => T('profiles').find((p) => p.id === uid())?.role_id
 // table → permissions needed to read / write (mirrors the database security rules)
 const READ = {
@@ -462,8 +462,8 @@ function rpc(name, a) {
       if (!String(a.p_name || '').trim()) throw new Error('Enter the customer name')
       const key = (x) => String(x || '').replace(/\D/g, '').slice(-10)
       const hit = key(a.p_phone).length >= 10 && T('clients').find((c) => c.customer_type === 'walkin' && key(c.phone) === key(a.p_phone))
-      const more = { whatsapp: a.p_whatsapp || a.p_phone || null, email: a.p_email || null, city: a.p_city || null, address: a.p_address || null }
-      if (hit) { for (const k of ['whatsapp', 'email', 'city', 'address']) if (!hit[k] && more[k]) hit[k] = more[k]; persist(); return { data: hit.id, error: null } }
+      const more = { whatsapp: a.p_whatsapp || a.p_phone || null, email: a.p_email || null, city: a.p_city || null, address: a.p_address || null, salesman_id: a.p_salesman_id || null, salesman_name: a.p_salesman_name || null }
+      if (hit) { for (const k of Object.keys(more)) if (!hit[k] && more[k]) hit[k] = more[k]; persist(); return { data: hit.id, error: null } }
       const prev = currentUser; currentUser = null
       try {
         const { data: c } = new Query('clients').insert({ name: a.p_name.trim(), contact_person: a.p_name.trim(), phone: a.p_phone || null, ...more, customer_type: 'walkin', status: 'active', account_manager_id: me, created_by: me }).exec()
@@ -488,9 +488,11 @@ function rpc(name, a) {
         let cid = a.p_client_id
         if (!cid) {
           if (!String(a.p_name || '').trim()) throw new Error('Enter the customer name')
-          if (key(a.p_phone).length >= 10) cid = T('clients').find((c) => c.customer_type === 'walkin' && key(c.phone) === key(a.p_phone))?.id
+          const more = { whatsapp: a.p_whatsapp || a.p_phone || null, email: a.p_email || null, city: a.p_city || null, address: a.p_address || null, salesman_id: a.p_salesman_id || null, salesman_name: a.p_salesman_name || null }
+          const hit = key(a.p_phone).length >= 10 && T('clients').find((c) => c.customer_type === 'walkin' && key(c.phone) === key(a.p_phone))
+          if (hit) { cid = hit.id; for (const k of Object.keys(more)) if (!hit[k] && more[k]) hit[k] = more[k] }
           if (!cid) {
-            const { data: c } = new Query('clients').insert({ name: a.p_name.trim(), contact_person: a.p_name.trim(), phone: a.p_phone || null, whatsapp: a.p_phone || null, customer_type: 'walkin', status: 'active', account_manager_id: me, created_by: me }).exec()
+            const { data: c } = new Query('clients').insert({ name: a.p_name.trim(), contact_person: a.p_name.trim(), phone: a.p_phone || null, ...more, customer_type: 'walkin', status: 'active', account_manager_id: me, created_by: me }).exec()
             cid = (Array.isArray(c) ? c[0] : c).id
           }
         }
@@ -519,7 +521,7 @@ function rpc(name, a) {
     if (name === 'convert_lead') {
       const l = T('leads').find((x) => x.id === a.p_lead); if (!l) throw new Error('Lead not found')
       if (l.converted_client_id) return { data: l.converted_client_id, error: null }
-      const { data: c } = new Query('clients').insert({ name: l.company || l.name, contact_person: l.name, phone: l.phone, whatsapp: l.whatsapp, email: l.email, city: l.city, industry: l.industry, account_manager_id: l.owner_id || uid(), status: 'onboarding', lead_id: l.id, notes: l.notes }).exec()
+      const { data: c } = new Query('clients').insert({ name: l.company || l.name, contact_person: l.name, phone: l.phone, whatsapp: l.whatsapp, email: l.email, city: l.city, industry: l.industry, account_manager_id: l.owner_id || uid(), salesman_id: l.owner_id || uid(), status: 'onboarding', lead_id: l.id, notes: l.notes }).exec()
       const row = Array.isArray(c) ? c[0] : c
       Object.assign(l, { stage: 'won', converted_client_id: row.id })
       T('interactions').forEach((i) => { if (i.lead_id === l.id && !i.client_id) i.client_id = row.id })

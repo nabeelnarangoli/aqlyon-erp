@@ -12,6 +12,9 @@ update public.profiles set active = true, role_id = (select r.id from auth.users
   where exists (select 1 from auth.users u where u.id = profiles.id and u.raw_user_meta_data ? 'role');
 select p.email, r.name from public.profiles p left join public.roles r on r.id = p.role_id order by email;
 
+-- earlier steps were written when marketers could handle quotes & suppliers: give them money access until the money test
+update public.roles set permissions = array_append(permissions, 'money.view') where key = 'marketer';
+
 create or replace function pg_temp.as_user(u text) returns void language plpgsql as $$
 begin perform set_config('request.jwt.claim.sub', u, false); execute 'set role authenticated'; end $$;
 
@@ -251,4 +254,18 @@ select pg_temp.as_user('00000000-0000-0000-0000-00000000000c');
 select 'walk-in details filled' t, walkin_customer('Fresh Visitor', '9000000001', null, 'fresh@x.in', 'Vadakara', 'Near bus stand') is not null;
 reset role;
 select 'details' t, phone, whatsapp, email, city, address from clients where phone = '9000000001';
+-- ===== money visibility: marketer (no money.view) loses finance access; finance keeps it
+update public.roles set permissions = array_remove(permissions, 'money.view') where key = 'marketer';
+select pg_temp.as_user('00000000-0000-0000-0000-00000000000b');
+select 'marketer has quotations.manage but no money → has_perm false' t, has_perm('quotations.manage') as allowed, has_perm('tasks.manage') as tasks_ok;
+select 'marketer sees invoices (only walk-ins they made)' t, count(*) from invoices where sale_channel <> 'walkin';
+reset role;
+select pg_temp.as_user('00000000-0000-0000-0000-00000000000d');
+select 'finance sees invoices' t, has_perm('invoices.view'), count(*) > 0 from invoices;
+reset role;
+select pg_temp.as_user('00000000-0000-0000-0000-00000000000c');
+select 'walk-in with salesman + details' t, (walkin_sale(null, 'Salim', '9811112222', '[{"description":"Poster","qty":1,"rate":500}]', 0, 500, 'UPI', null, null,
+   null, 'salim@x.in', 'Payyoli', 'Main road', null, 'Ravi (agent)')) ->> 'paid' as paid;
+reset role;
+select 'saved' t, whatsapp, email, city, address, salesman_name from clients where phone='9811112222';
 select 'ALL TESTS PASSED' as result;

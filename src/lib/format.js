@@ -2,10 +2,18 @@ const inr = new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR',
 const inr2 = new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', minimumFractionDigits: 2, maximumFractionDigits: 2 })
 const num = new Intl.NumberFormat('en-IN')
 
-export const money = (v) => inr.format(Number(v || 0))
-export const money2 = (v) => inr2.format(Number(v || 0))
+// Amounts are hidden ("—") for people whose role lacks "See prices & money" (set at sign-in).
+// rawMoney / rawMoney2 always show: used only where a person sees money they collect (walk-in sales, their receipts).
+let SHOW_MONEY = true
+export const setMoneyVisible = (v) => { SHOW_MONEY = !!v }
+export const showMoney = () => SHOW_MONEY
+export const rawMoney = (v) => inr.format(Number(v || 0))
+export const rawMoney2 = (v) => inr2.format(Number(v || 0))
+export const money = (v) => (SHOW_MONEY ? rawMoney(v) : '—')
+export const money2 = (v) => (SHOW_MONEY ? rawMoney2(v) : '—')
 export const n = (v) => num.format(Number(v || 0))
 export const compact = (v) => {
+  if (!SHOW_MONEY) return '—'
   const x = Number(v || 0)
   if (Math.abs(x) >= 1e7) return '₹' + (x / 1e7).toFixed(1).replace(/\.0$/, '') + ' Cr'
   if (Math.abs(x) >= 1e5) return '₹' + (x / 1e5).toFixed(1).replace(/\.0$/, '') + ' L'

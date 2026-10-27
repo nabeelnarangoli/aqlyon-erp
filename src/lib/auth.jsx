@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useState, useCallback, useMemo } from 'react'
 import { supabase } from './supabase'
 import { grants } from './permissions'
+import { setMoneyVisible } from './format'
 
 const AuthCtx = createContext(null)
 
@@ -41,11 +42,13 @@ export function AuthProvider({ children }) {
   const perms = useMemo(() => myRole?.permissions || [], [myRole])
   /** has('a', 'b') → true if the user has ANY of the permissions */
   const has = useCallback((...want) => grants(perms, ...want), [perms])
+  const seeMoney = grants(perms, 'money.view')
+  setMoneyVisible(seeMoney)   // every money()/money2() in the app shows "—" without it
   const memberHas = useCallback((m, ...want) => !!m && m.active && grants(roleOf(m.role_id)?.permissions, ...want), [roleOf])
 
   const value = {
     session, user: session?.user, profile, team, roles, settings, loading,
-    role: myRole, perms, has, roleOf, memberHas,
+    role: myRole, perms, has, roleOf, memberHas, seeMoney,
     isAdmin: perms.includes('*'),
     refresh: () => loadProfile(session?.user?.id),
     signOut: () => supabase.auth.signOut(),

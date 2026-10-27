@@ -5,20 +5,21 @@ import { supabase, q } from '../../lib/supabase'
 import { useAuth } from '../../lib/auth'
 import { useData, useDebounced } from '../../lib/hooks'
 import { PAYMENT_METHODS, INVOICE_STATUS } from '../../lib/constants'
-import { money, money2, date, todayISO } from '../../lib/format'
+import { rawMoney, rawMoney2, date, todayISO } from '../../lib/format'
 import {
-  PageHeader, Button, Card, Field, Input, Select, ClientSelect, Badge, StatusBadge, IconBtn, Empty, Loading, Stat, Modal,
+  PageHeader, Button, Card, Field, Input, Select, Textarea, ClientSelect, SalesmanPicker, Badge, StatusBadge, IconBtn, Empty, Loading, Stat, Modal,
   useAction, useForm
 } from '../../components/ui'
 
 const blankItem = () => ({ description: '', qty: 1, rate: '' })
+const blankCust = () => ({ id: null, name: '', phone: '', whatsapp: '', waSame: true, email: '', city: '', address: '', salesman_id: null, salesman_name: '' })
 
 export default function WalkIn() {
   const nav = useNavigate()
   const { has, user } = useAuth()
   const canPickClient = has('clients.view', 'clients.manage', 'invoices.manage')
   const [mode, setMode] = useState('walkin')            // walkin | client
-  const [cust, setCust] = useState({ id: null, name: '', phone: '' })
+  const [cust, setCust] = useState(blankCust)
   const [clientId, setClientId] = useState('')
   const [items, setItems] = useState([blankItem()])
   const [discount, setDiscount] = useState('')
@@ -42,7 +43,7 @@ export default function WalkIn() {
     if (k === 'description') { const s = services.data.find((s) => s.name.toLowerCase() === String(v).toLowerCase()); if (s && !x.rate) n.rate = s.rate }
     return n
   }))
-  const reset = () => { setCust({ id: null, name: '', phone: '' }); setClientId(''); setItems([blankItem()]); setDiscount(''); set('amount')(''); set('reference')(''); set('notes')(''); setPaidTouched(false) }
+  const reset = () => { setCust(blankCust()); setClientId(''); setItems([blankItem()]); setDiscount(''); set('amount')(''); set('reference')(''); set('notes')(''); setPaidTouched(false) }
 
   const submit = (e) => { e.preventDefault(); run(async () => {
     const lines = items.filter((it) => it.description.trim() || Number(it.rate))
@@ -50,11 +51,14 @@ export default function WalkIn() {
     if (!lines.length) throw new Error('Add at least one item')
     if (lines.some((l) => !l.description || l.qty <= 0)) throw new Error('Each item needs a description and quantity')
     if (mode === 'walkin' && !cust.id && !cust.name.trim()) throw new Error('Enter the customer name')
+    if (mode === 'walkin' && cust.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cust.email.trim())) throw new Error('Check the email address')
     if (mode === 'client' && !clientId) throw new Error('Choose the client')
-    if (received < 0 || received > total + 0.01) throw new Error(`Amount received must be between ₹0 and ${money2(total)}`)
+    if (received < 0 || received > total + 0.01) throw new Error(`Amount received must be between ₹0 and ${rawMoney2(total)}`)
     const r = await q(supabase.rpc('walkin_sale', {
       p_client_id: mode === 'client' ? clientId : cust.id, p_name: cust.name, p_phone: cust.phone, p_items: lines,
-      p_discount: Number(discount) || 0, p_paid: received, p_method: pay.method, p_reference: pay.reference || null, p_notes: pay.notes || null
+      p_discount: Number(discount) || 0, p_paid: received, p_method: pay.method, p_reference: pay.reference || null, p_notes: pay.notes || null,
+      p_whatsapp: (cust.waSame ? cust.phone : cust.whatsapp) || null, p_email: cust.email.trim() || null, p_city: cust.city.trim() || null, p_address: cust.address.trim() || null,
+      p_salesman_id: cust.salesman_id || null, p_salesman_name: cust.salesman_name?.trim() || null
     }))
     setDone(r); reset(); mine.reload()
   }) }
@@ -85,20 +89,28 @@ export default function WalkIn() {
             ) : cust.id ? (
               <div className="row between wrap gap-s" style={{ padding: '10px 12px', background: 'var(--green-50)', borderRadius: 10 }}>
                 <div><Badge tone="green"><Repeat2 size={12} /> Returning customer</Badge> <b>{cust.name}</b> <span className="muted small">{cust.phone}</span></div>
-                <Button type="button" size="sm" variant="ghost" onClick={() => setCust({ id: null, name: '', phone: '' })}>Change</Button>
+                <Button type="button" size="sm" variant="ghost" onClick={() => setCust(blankCust())}>Change</Button>
               </div>
             ) : (
               <>
                 <div className="form">
                   <Field label="Mobile number"><Input type="tel" inputMode="tel" value={cust.phone} onChange={(e) => setCust({ ...cust, phone: e.target.value })} placeholder="98470 12345" autoFocus /></Field>
                   <Field label="Name" required><Input value={cust.name} onChange={(e) => setCust({ ...cust, name: e.target.value })} placeholder="Customer / shop name" /></Field>
+                  <Field label="WhatsApp">
+                    {cust.waSame ? <label className="check" style={{ minHeight: 38 }}><input type="checkbox" checked onChange={() => setCust({ ...cust, waSame: false, whatsapp: cust.phone })} />Same as mobile number</label>
+                      : <Input type="tel" inputMode="tel" value={cust.whatsapp} onChange={(e) => setCust({ ...cust, whatsapp: e.target.value })} placeholder="WhatsApp number" />}
+                  </Field>
+                  <Field label="Email"><Input type="email" value={cust.email} onChange={(e) => setCust({ ...cust, email: e.target.value })} placeholder="name@example.com" /></Field>
+                  <Field label="Location / area"><Input value={cust.city} onChange={(e) => setCust({ ...cust, city: e.target.value })} placeholder="e.g. Koyilandy, Vadakara" /></Field>
+                  <Field label="Salesman / brought by"><SalesmanPicker id={cust.salesman_id} name={cust.salesman_name} onChange={(sid, sname) => setCust((x) => ({ ...x, salesman_id: sid, salesman_name: sname }))} /></Field>
+                  <Field label="Address" span={2}><Textarea rows={2} value={cust.address} onChange={(e) => setCust({ ...cust, address: e.target.value })} placeholder="Building, street, PIN — printed on the receipt" /></Field>
                 </div>
                 {matches.data.length > 0 && (
                   <div className="mt">
                     <div className="tiny faint mb">Been here before? Tap to use their details:</div>
                     <div className="row wrap gap-xs">{matches.data.map((m) => (
-                      <button type="button" key={m.id} className="btn btn-outline btn-sm" onClick={() => setCust({ id: m.id, name: m.name, phone: m.phone || '' })}>
-                        <Repeat2 size={13} />{m.name}<span className="faint">{m.phone ? ` · ${m.phone}` : ''} · {m.visits} visit{m.visits === 1 ? '' : 's'}{Number(m.balance) > 0 ? ` · owes ${money(m.balance)}` : ''}</span>
+                      <button type="button" key={m.id} className="btn btn-outline btn-sm" onClick={() => setCust({ ...blankCust(), id: m.id, name: m.name, phone: m.phone || '' })}>
+                        <Repeat2 size={13} />{m.name}<span className="faint">{m.phone ? ` · ${m.phone}` : ''} · {m.visits} visit{m.visits === 1 ? '' : 's'}{Number(m.balance) > 0 ? ` · owes ${rawMoney(m.balance)}` : ''}</span>
                       </button>))}</div>
                   </div>
                 )}
@@ -115,21 +127,21 @@ export default function WalkIn() {
                   <td><input className="input" list="walkin-services" value={it.description} onChange={(e) => setItem(i, 'description', e.target.value)} placeholder="e.g. Visiting card design" /></td>
                   <td><input className="input right" type="number" min="0" step="any" value={it.qty} onChange={(e) => setItem(i, 'qty', e.target.value)} /></td>
                   <td><input className="input right" type="number" min="0" step="any" value={it.rate} onChange={(e) => setItem(i, 'rate', e.target.value)} /></td>
-                  <td className="num strong">{money2((Number(it.qty) || 0) * (Number(it.rate) || 0))}</td>
+                  <td className="num strong">{rawMoney2((Number(it.qty) || 0) * (Number(it.rate) || 0))}</td>
                   <td>{items.length > 1 && <IconBtn icon={Trash2} size={14} title="Remove" onClick={() => setItems((xs) => xs.filter((_, j) => j !== i))} />}</td>
                 </tr>))}</tbody>
             </table></div>
-            <datalist id="walkin-services">{services.data.map((s) => <option key={s.name} value={s.name}>{money2(s.rate)} {s.unit}</option>)}</datalist>
+            <datalist id="walkin-services">{services.data.map((s) => <option key={s.name} value={s.name}>{rawMoney2(s.rate)} {s.unit}</option>)}</datalist>
             <div className="row between wrap gap-s card-body">
               <Button type="button" variant="ghost" size="sm" icon={Plus} onClick={() => setItems((xs) => [...xs, blankItem()])}>Add item</Button>
               <div className="row gap-s"><span className="small muted">Discount ₹</span><input className="input right" style={{ width: 110 }} type="number" min="0" step="any" value={discount} onChange={(e) => setDiscount(e.target.value)} /></div>
             </div>
-            <div className="row between card-body" style={{ borderTop: '1px solid var(--line)', fontSize: 18 }}><b>Total</b><b>{money2(total)}</b></div>
+            <div className="row between card-body" style={{ borderTop: '1px solid var(--line)', fontSize: 18 }}><b>Total</b><b>{rawMoney2(total)}</b></div>
           </Card>
 
           <Card title="Collect payment">
             <div className="form">
-              <Field label="Amount received (₹)" hint={balance > 0 ? `Balance ${money2(balance)} stays due on the invoice` : 'Paid in full'}>
+              <Field label="Amount received (₹)" hint={balance > 0 ? `Balance ${rawMoney2(balance)} stays due on the invoice` : 'Paid in full'}>
                 <Input type="number" min="0" step="any" value={paidTouched ? pay.amount : total || ''} onChange={(e) => { setPaidTouched(true); set('amount')(e.target.value) }} />
               </Field>
               <Field label="Method"><Select placeholder={false} options={PAYMENT_METHODS} value={pay.method} onChange={set('method')} /></Field>
@@ -137,13 +149,13 @@ export default function WalkIn() {
               <Field label="Note on invoice"><Input value={pay.notes} onChange={set('notes')} placeholder="Optional" /></Field>
             </div>
             <div className="row mt" style={{ justifyContent: 'flex-end' }}>
-              <Button type="submit" icon={CheckCircle2} loading={busy} disabled={!total}>{received > 0 ? `Create invoice & collect ${money2(received)}` : 'Create invoice (unpaid)'}</Button>
+              <Button type="submit" icon={CheckCircle2} loading={busy} disabled={!total}>{received > 0 ? `Create invoice & collect ${rawMoney2(received)}` : 'Create invoice (unpaid)'}</Button>
             </div>
           </Card>
         </form>
 
         <div className="grid" style={{ alignContent: 'start' }}>
-          <Stat label="You collected today" value={money(today.total)} sub={PAYMENT_METHODS.filter((m) => today[m]).map((m) => `${m} ${money(today[m])}`).join(' · ') || 'Nothing yet'} icon={Banknote} tone="teal" />
+          <Stat label="You collected today" value={rawMoney(today.total)} sub={PAYMENT_METHODS.filter((m) => today[m]).map((m) => `${m} ${rawMoney(today[m])}`).join(' · ') || 'Nothing yet'} icon={Banknote} tone="teal" />
           <Card title="Your walk-in sales · last 30 days" pad={false}>
             {mine.loading ? <Loading /> : mine.data.inv.length === 0 ? <Empty icon={ShoppingBag} title="No walk-in sales yet" /> : (
               <div className="list">{mine.data.inv.map((i) => {
@@ -154,7 +166,7 @@ export default function WalkIn() {
                       <Link to={`/finance/invoices/${i.id}`} className="strong">{i.clients?.name || '—'}</Link>
                       <div className="tiny faint">{i.number} · {date(i.issue_date)}</div>
                     </div>
-                    <div className="right"><div className="strong">{money2(i.total)}</div>{bal > 0.001 ? <Badge tone="orange">due {money(bal)}</Badge> : <StatusBadge list={INVOICE_STATUS} value={i.status} />}</div>
+                    <div className="right"><div className="strong">{rawMoney2(i.total)}</div>{bal > 0.001 ? <Badge tone="orange">due {rawMoney(bal)}</Badge> : <StatusBadge list={INVOICE_STATUS} value={i.status} />}</div>
                     {bal > 0.001 && i.status !== 'cancelled' && <IconBtn icon={Wallet} size={15} title="Collect balance" onClick={() => setCollect({ ...i, balance: bal })} />}
                   </div>)
               })}</div>
@@ -168,8 +180,8 @@ export default function WalkIn() {
           footer={<><Button variant="ghost" onClick={() => setDone(null)}>New sale</Button><Button onClick={() => nav(`/finance/invoices/${done.invoice_id}`)}>Open receipt · Print / WhatsApp</Button></>}>
           <div className="center" style={{ padding: '6px 0 4px' }}>
             <CheckCircle2 size={40} color="var(--green)" />
-            <div style={{ fontSize: 22, fontWeight: 700, marginTop: 6 }}>{money2(done.total)}</div>
-            <div className="muted">{Number(done.paid) >= Number(done.total) ? `Paid in full · collected by you` : Number(done.paid) > 0 ? `Received ${money2(done.paid)} · balance ${money2(done.total - done.paid)}` : 'Not paid yet'}</div>
+            <div style={{ fontSize: 22, fontWeight: 700, marginTop: 6 }}>{rawMoney2(done.total)}</div>
+            <div className="muted">{Number(done.paid) >= Number(done.total) ? `Paid in full · collected by you` : Number(done.paid) > 0 ? `Received ${rawMoney2(done.paid)} · balance ${rawMoney2(done.total - done.paid)}` : 'Not paid yet'}</div>
           </div>
         </Modal>
       )}
@@ -188,7 +200,7 @@ export function CollectModal({ inv, onClose, onDone }) {
     onDone()
   }, 'Payment collected') }
   return (
-    <Modal open size="sm" onClose={onClose} title="Collect balance" subtitle={`${inv.number} · balance ${money2(bal)}`}
+    <Modal open size="sm" onClose={onClose} title="Collect balance" subtitle={`${inv.number} · balance ${rawMoney2(bal)}`}
       footer={<><Button variant="ghost" onClick={onClose}>Cancel</Button><Button form="wcol" type="submit" loading={busy}>Collect</Button></>}>
       <form id="wcol" className="form f1" onSubmit={save}>
         <Field label="Amount (₹)" required><Input type="number" min="0" step="any" value={f.amount} onChange={set('amount')} /></Field>

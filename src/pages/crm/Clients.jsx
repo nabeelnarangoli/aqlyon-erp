@@ -5,9 +5,9 @@ import { supabase, q } from '../../lib/supabase'
 import { useData } from '../../lib/hooks'
 import { useAuth } from '../../lib/auth'
 import { CLIENT_STATUS, INDUSTRIES } from '../../lib/constants'
-import { money, downloadCSV, date } from '../../lib/format'
+import { money, downloadCSV, date, showMoney } from '../../lib/format'
 import {
-  PageHeader, Button, Badge, StatusBadge, Member, Modal, Field, Input, Select, Textarea, MemberSelect, SearchInput,
+  PageHeader, Button, Badge, StatusBadge, Member, Modal, Field, Input, Select, Textarea, MemberSelect, SalesmanPicker, SearchInput,
   Loading, ErrorBox, Empty, useAction, useForm, invalidateClients
 } from '../../components/ui'
 
@@ -17,6 +17,8 @@ export default function Clients() {
   const [search, setSearch] = useState('')
   const [status, setStatus] = useState('current')
   const [ctype, setCtype] = useState('')
+  const [sm, setSm] = useState('')
+  const { team } = useAuth()
   const [am, setAm] = useState('')
   const [adding, setAdding] = useState(false)
   const { data, loading, error, reload } = useData(async () => {
@@ -36,27 +38,29 @@ export default function Clients() {
     const s = search.toLowerCase()
     return (!s || [c.name, c.contact_person, c.phone, c.code, c.city, c.industry].some((v) => v?.toLowerCase().includes(s)))
       && (!status || (status === 'current' ? ['active', 'onboarding'].includes(c.status) : c.status === status)) && (!am || c.account_manager_id === am) && (!ctype || (c.customer_type || 'regular') === ctype)
-  }), [data, search, status, am, ctype])
+      && (!sm || (sm === '__ext' ? !!c.salesman_name : sm === '__none' ? !c.salesman_id && !c.salesman_name : c.salesman_id === sm))
+  }), [data, search, status, am, ctype, sm])
   const totalMrr = rows.reduce((a, c) => a + c.mrr, 0)
 
   return (
     <>
-      <PageHeader title="Clients" subtitle={`${rows.length} clients${has('packages.view', 'packages.manage') ? ` · ${money(totalMrr)} monthly recurring` : ''}`}
+      <PageHeader title="Clients" subtitle={`${rows.length} clients${showMoney() && has('packages.view', 'packages.manage') ? ` · ${money(totalMrr)} monthly recurring` : ''}`}
         actions={<>
-          <Button variant="outline" icon={Download} onClick={() => downloadCSV('clients.csv', rows.map((c) => ({ code: c.code, name: c.name, contact: c.contact_person, phone: c.phone, email: c.email, city: c.city, industry: c.industry, status: c.status, monthly_fee: c.mrr })))}>Export</Button>
+          <Button variant="outline" icon={Download} onClick={() => downloadCSV('clients.csv', rows.map((c) => ({ code: c.code, name: c.name, contact: c.contact_person, phone: c.phone, email: c.email, city: c.city, industry: c.industry, status: c.status, salesman: c.salesman_id ? team.find((m) => m.id === c.salesman_id)?.full_name : c.salesman_name || '', ...(showMoney() ? { monthly_fee: c.mrr } : {}) })))}>Export</Button>
           {has('clients.manage') && <Button icon={Plus} onClick={() => setAdding(true)}>New client</Button>}
         </>} />
       <div className="filters">
         <SearchInput value={search} onChange={setSearch} placeholder="Search clients…" />
         <Select options={[{ id: 'current', label: 'Active + onboarding' }, ...CLIENT_STATUS]} value={status} onChange={(v) => setStatus(v || '')} placeholder="All statuses" />
         <Select options={[{ id: 'regular', label: 'Regular clients' }, { id: 'walkin', label: 'Walk-in customers' }]} value={ctype} onChange={(v) => setCtype(v || '')} placeholder="All customer types" />
+        <Select options={[...team.map((m) => ({ id: m.id, label: m.full_name })), { id: '__ext', label: 'Outside agents' }, { id: '__none', label: 'Salesman not recorded' }]} value={sm} onChange={(v) => setSm(v || '')} placeholder="All salesmen" />
         <MemberSelect perm={['leads.manage', 'clients.manage']} value={am} onChange={(v) => setAm(v || '')} placeholder="All account managers" />
       </div>
       <ErrorBox error={error} onRetry={reload} />
       {loading ? <Loading /> : rows.length === 0 ? <Empty icon={Building2} title="No clients found">Convert a won lead or add a client directly.</Empty> : (
         <div className="card table-wrap">
           <table className="table">
-            <thead><tr><th>Client</th><th>Contact</th><th>Industry</th><th>Status</th><th>Account manager</th>{has('tasks.view', 'tasks.work', 'tasks.manage') && <th className="num">Open tasks</th>}{has('packages.view', 'packages.manage') && <th className="num">Monthly fee</th>}<th>Since</th></tr></thead>
+            <thead><tr><th>Client</th><th>Contact</th><th>Industry</th><th>Status</th><th>Account manager</th><th>Salesman</th>{has('tasks.view', 'tasks.work', 'tasks.manage') && <th className="num">Open tasks</th>}{showMoney() && has('packages.view', 'packages.manage') && <th className="num">Monthly fee</th>}<th>Since</th></tr></thead>
             <tbody>
               {rows.map((c) => (
                 <tr key={c.id} className="click" onClick={() => nav(`/clients/${c.id}`)}>
@@ -65,8 +69,9 @@ export default function Clients() {
                   <td>{c.industry || '—'}</td>
                   <td><StatusBadge list={CLIENT_STATUS} value={c.status} /></td>
                   <td><Member id={c.account_manager_id} size={22} /></td>
+                  <td className="small">{c.salesman_id ? <Member id={c.salesman_id} size={22} /> : c.salesman_name || <span className="faint">—</span>}</td>
                   {has('tasks.view', 'tasks.work', 'tasks.manage') && <td className="num">{c.openTasks || '—'}</td>}
-                  {has('packages.view', 'packages.manage') && <td className="num">{c.mrr ? money(c.mrr) : '—'}</td>}
+                  {showMoney() && has('packages.view', 'packages.manage') && <td className="num">{c.mrr ? money(c.mrr) : '—'}</td>}
                   <td className="nowrap">{date(c.onboarded_on)}</td>
                 </tr>
               ))}
@@ -87,9 +92,9 @@ export const monthly = (p) => {
 export function ClientModal({ client = {}, onClose, onSaved }) {
   const { user } = useAuth()
   const isNew = !client.id
-  const [f, set] = useForm({
+  const [f, set, setF] = useForm({
     name: '', contact_person: '', phone: '', whatsapp: '', email: '', address: '', city: 'Koyilandy', industry: '', website: '', instagram: '',
-    facebook: '', linkedin: '', youtube: '', other_links: '', account_manager_id: user.id, status: 'active', brand_colors: '', brand_fonts: '',
+    facebook: '', linkedin: '', youtube: '', other_links: '', account_manager_id: user.id, salesman_id: isNew ? user.id : null, salesman_name: '', status: 'active', brand_colors: '', brand_fonts: '',
     brand_tone: '', brand_assets_link: '', target_audience: '', notes: '', onboarded_on: new Date().toISOString().slice(0, 10), ...client
   })
   const [busy, run] = useAction()
@@ -99,6 +104,7 @@ export function ClientModal({ client = {}, onClose, onSaved }) {
       const p = { ...f }
       ;['id', 'created_at', 'updated_at', 'created_by', 'code', 'mrr', 'openTasks'].forEach((k) => delete p[k])
       p.account_manager_id = p.account_manager_id || null
+      p.salesman_id = p.salesman_id || null; p.salesman_name = p.salesman_id ? null : (p.salesman_name || '').trim() || null
       const row = isNew ? await q(supabase.from('clients').insert(p).select().single()) : await q(supabase.from('clients').update(p).eq('id', client.id).select().single())
       invalidateClients(); onSaved(row)
     }, isNew ? 'Client created' : 'Client updated')
@@ -118,6 +124,7 @@ export function ClientModal({ client = {}, onClose, onSaved }) {
         <Field label="Status"><Select placeholder={false} options={CLIENT_STATUS} value={f.status} onChange={set('status')} /></Field>
         <Field label="Account manager"><MemberSelect perm={['leads.manage', 'clients.manage']} value={f.account_manager_id} onChange={set('account_manager_id')} /></Field>
         <Field label="Client since"><Input type="date" value={f.onboarded_on} onChange={set('onboarded_on')} /></Field>
+        <Field label="Salesman / brought by" hint="Team member or outside agent who brought this client"><SalesmanPicker id={f.salesman_id} name={f.salesman_name} onChange={(sid, sname) => setF((x) => ({ ...x, salesman_id: sid, salesman_name: sname }))} /></Field>
         <div className="field span-2"><h3 className="mt">Online presence</h3></div>
         <Field label="Instagram"><Input value={f.instagram} onChange={set('instagram')} placeholder="@handle or URL" /></Field>
         <Field label="Facebook"><Input value={f.facebook} onChange={set('facebook')} /></Field>

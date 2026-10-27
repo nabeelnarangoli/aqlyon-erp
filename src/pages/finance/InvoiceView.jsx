@@ -6,7 +6,7 @@ import { supabase, q } from '../../lib/supabase'
 import { useData } from '../../lib/hooks'
 import { useAuth } from '../../lib/auth'
 import { INVOICE_STATUS, QUOTE_STATUS } from '../../lib/constants'
-import { money2, date, amountInWords, waLink, todayISO, addDays } from '../../lib/format'
+import { rawMoney2, date, amountInWords, waLink, todayISO, addDays } from '../../lib/format'
 import { Button, Badge, StatusBadge, Card, Loading, ErrorBox, IconBtn, useAction, useToast } from '../../components/ui'
 import DocEditor from './DocEditor'
 import RichText from '../../components/RichText'
@@ -56,10 +56,10 @@ export default function InvoiceView({ kind }) {
   const share = () => {
     const phone = c?.whatsapp || c?.phone
     const text = kind === 'invoice' && d.status === 'paid'
-      ? `Hello ${c?.contact_person || c?.name || ''},\n\nThank you for your payment of ${money2(d.amount_paid)} for invoice ${d.number} (${(d.items || []).map((i) => i.description).join(', ')}).\n\n— ${st.company_name}${st.phone ? `\n${st.phone}` : ''}`
+      ? `Hello ${c?.contact_person || c?.name || ''},\n\nThank you for your payment of ${rawMoney2(d.amount_paid)} for invoice ${d.number} (${(d.items || []).map((i) => i.description).join(', ')}).\n\n— ${st.company_name}${st.phone ? `\n${st.phone}` : ''}`
       : kind === 'invoice'
-      ? `Hello ${c?.contact_person || c?.name || ''},\n\nPlease find invoice ${d.number} from ${st.company_name} for ${money2(d.total)}${balance < d.total ? ` (balance ${money2(balance)})` : ''}, due on ${date(d.due_date)}.${st.upi_id ? `\n\nUPI: ${st.upi_id}` : ''}${st.bank_details ? `\n\nBank details:\n${st.bank_details}` : ''}\n\nThank you!`
-      : `Hello ${c?.contact_person || ''},\n\nSharing our quotation ${d.number} for ${money2(d.total)}, valid until ${date(d.valid_until)}. Happy to discuss any changes.\n\n— ${st.company_name}`
+      ? `Hello ${c?.contact_person || c?.name || ''},\n\nPlease find invoice ${d.number} from ${st.company_name} for ${rawMoney2(d.total)}${balance < d.total ? ` (balance ${rawMoney2(balance)})` : ''}, due on ${date(d.due_date)}.${st.upi_id ? `\n\nUPI: ${st.upi_id}` : ''}${st.bank_details ? `\n\nBank details:\n${st.bank_details}` : ''}\n\nThank you!`
+      : `Hello ${c?.contact_person || ''},\n\nSharing our quotation ${d.number} for ${rawMoney2(d.total)}, valid until ${date(d.valid_until)}. Happy to discuss any changes.\n\n— ${st.company_name}`
     window.open(waLink(phone, text), '_blank')
     if (d.status === 'draft') setStatus('sent')
   }
@@ -88,7 +88,7 @@ export default function InvoiceView({ kind }) {
     run(async () => { await q(supabase.from(table).delete().eq('id', id)); nav(-1) }, 'Deleted')
   }
   const delPay = async (p) => {
-    if (!(await confirm(`Remove payment of ${money2(p.amount)}?`, { danger: true, okText: 'Remove' }))) return
+    if (!(await confirm(`Remove payment of ${rawMoney2(p.amount)}?`, { danger: true, okText: 'Remove' }))) return
     run(async () => { await q(supabase.from('payments').delete().eq('id', p.id)); pays.reload(); doc.reload() }, 'Payment removed')
   }
 
@@ -145,19 +145,19 @@ export default function InvoiceView({ kind }) {
           <thead><tr><th style={{ width: 40 }}>#</th><th>Description</th><th className="right">Qty</th><th className="right">Rate</th><th className="right">Amount</th></tr></thead>
           <tbody>
             {(d.items || []).map((it, i) => (
-              <tr key={i}><td>{i + 1}</td><td><div className={it.details ? 'strong' : undefined}>{it.description}</div>{it.details && <div className="item-details">{it.details}</div>}</td><td className="right">{it.qty}</td><td className="right">{money2(it.rate)}</td><td className="right strong">{money2(Number(it.qty) * Number(it.rate))}</td></tr>
+              <tr key={i}><td>{i + 1}</td><td><div className={it.details ? 'strong' : undefined}>{it.description}</div>{it.details && <div className="item-details">{it.details}</div>}</td><td className="right">{it.qty}</td><td className="right">{rawMoney2(it.rate)}</td><td className="right strong">{rawMoney2(Number(it.qty) * Number(it.rate))}</td></tr>
             ))}
           </tbody>
         </table>
         <div className="totals">
-          <div><span>Subtotal</span><span>{money2(d.subtotal)}</span></div>
-          {Number(d.discount) > 0 && <div><span>Discount</span><span>− {money2(d.discount)}</span></div>}
-          <div className="grand"><span>Total</span><span>{money2(d.total)}</span></div>
-          {kind === 'invoice' && Number(d.amount_paid) > 0 && <><div><span>Paid</span><span>{money2(d.amount_paid)}</span></div><div className="strong"><span>Balance due</span><span>{money2(balance)}</span></div></>}
+          <div><span>Subtotal</span><span>{rawMoney2(d.subtotal)}</span></div>
+          {Number(d.discount) > 0 && <div><span>Discount</span><span>− {rawMoney2(d.discount)}</span></div>}
+          <div className="grand"><span>Total</span><span>{rawMoney2(d.total)}</span></div>
+          {kind === 'invoice' && Number(d.amount_paid) > 0 && <><div><span>Paid</span><span>{rawMoney2(d.amount_paid)}</span></div><div className="strong"><span>Balance due</span><span>{rawMoney2(balance)}</span></div></>}
         </div>
         <p className="small" style={{ marginTop: 10 }}><b>Amount in words:</b> {amountInWords(d.total)}</p>
         {kind === 'invoice' && pays.data.length > 0 && (
-          <p className="small" style={{ marginTop: 6 }}><b>Received:</b> {pays.data.map((p) => `${money2(p.amount)} by ${p.method} on ${date(p.paid_on)}${p.collected_by && member(p.collected_by) ? ` (received by ${member(p.collected_by).full_name})` : ''}`).join('; ')}</p>
+          <p className="small" style={{ marginTop: 6 }}><b>Received:</b> {pays.data.map((p) => `${rawMoney2(p.amount)} by ${p.method} on ${date(p.paid_on)}${p.collected_by && member(p.collected_by) ? ` (received by ${member(p.collected_by).full_name})` : ''}`).join('; ')}</p>
         )}
         {d.notes && <p className="small pre" style={{ marginTop: 14 }}>{d.notes}</p>}
         {proposal ? (
@@ -173,7 +173,7 @@ export default function InvoiceView({ kind }) {
             <div className="proposal-block small">
               <h3>Acceptance</h3>
               <RichText text={st.proposal_acceptance ?? PROPOSAL_ACCEPTANCE} />
-              <p style={{ marginTop: 10 }}><b>Plan / services selected:</b> {(d.items || []).map((it) => `${it.description}${Number(it.qty) !== 1 ? ` × ${it.qty}` : ''}`).join(', ')} — <b>{money2(d.total)}</b></p>
+              <p style={{ marginTop: 10 }}><b>Plan / services selected:</b> {(d.items || []).map((it) => `${it.description}${Number(it.qty) !== 1 ? ` × ${it.qty}` : ''}`).join(', ')} — <b>{rawMoney2(d.total)}</b></p>
               <div className="sign-grid">
                 <div>Client name</div><div>Designation</div>
                 <div>Contact number</div><div>Date</div>
@@ -195,7 +195,7 @@ export default function InvoiceView({ kind }) {
         <Card className="mt-l no-print" title="Payments received" style={{ maxWidth: 820, margin: '20px auto 0' }}>
           <div className="list">{pays.data.map((p) => (
             <div key={p.id} className="list-item">
-              <div className="grow"><b>{money2(p.amount)}</b> <span className="muted">via {p.method}{p.reference && ` · ${p.reference}`}</span>{p.collected_by && <span className="small"> · collected by <b>{member(p.collected_by)?.full_name || 'team member'}</b></span>}{p.note && <div className="small faint">{p.note}</div>}</div>
+              <div className="grow"><b>{rawMoney2(p.amount)}</b> <span className="muted">via {p.method}{p.reference && ` · ${p.reference}`}</span>{p.collected_by && <span className="small"> · collected by <b>{member(p.collected_by)?.full_name || 'team member'}</b></span>}{p.note && <div className="small faint">{p.note}</div>}</div>
               <span className="muted">{date(p.paid_on)}</span>
               {isFin && <IconBtn icon={Pencil} size={14} title="Edit" onClick={() => setPaying(p)} />}
               {isFin && <IconBtn icon={Trash2} size={14} title="Remove" onClick={() => delPay(p)} />}

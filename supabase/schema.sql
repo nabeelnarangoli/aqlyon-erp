@@ -32,7 +32,7 @@ insert into public.roles (key, name, color, is_system, description, permissions)
   ('designer', 'Graphic Designer', 'violet', false, 'Works on design tasks and uploads proofs',
    '{clients.view,projects.view,tasks.view,tasks.work,calendar.view}'),
   ('finance', 'Finance', 'amber', false, 'Invoices, payments, expenses and suppliers',
-   '{clients.view,packages.view,quotations.view,quotations.manage,invoices.view,invoices.manage,payments.manage,expenses.manage,suppliers.view,suppliers.manage,suppliers.pay,reports.finance,reports.clients}')
+   '{money.view,clients.view,packages.view,quotations.view,quotations.manage,invoices.view,invoices.manage,payments.manage,expenses.manage,suppliers.view,suppliers.manage,suppliers.pay,reports.finance,reports.clients}')
 on conflict (key) do nothing;
 
 create table if not exists public.profiles (
@@ -93,9 +93,16 @@ language sql stable security definer set search_path = public as $$
   select coalesce((select r.permissions from public.profiles p join public.roles r on r.id = p.role_id
                    where p.id = auth.uid() and p.active), '{}')
 $$;
+-- finance permissions only count together with money.view ("See prices & money")
+create or replace function public.money_perms() returns text[] language sql immutable as $$
+  select array['quotations.view','quotations.manage','invoices.view','invoices.manage','payments.manage','expenses.manage','suppliers.view','suppliers.manage','suppliers.pay','reports.finance','reports.clients']::text[]
+$$;
 create or replace function public.has_perm(variadic perms text[]) returns boolean
 language sql stable security definer set search_path = public as $$
-  select '*' = any(public.my_perms()) or public.my_perms() && perms
+  select '*' = any(m) or exists (
+    select 1 from unnest(perms) w
+    where w = any(m) and (not (w = any(public.money_perms())) or 'money.view' = any(m)))
+  from (select public.my_perms() as m) x
 $$;
 create or replace function public.is_staff() returns boolean
 language sql stable security definer set search_path = public as $$
@@ -963,9 +970,9 @@ begin
   select * into l from public.leads where id = p_lead;
   if l.id is null then raise exception 'Lead not found'; end if;
   if l.converted_client_id is not null then return l.converted_client_id; end if;
-  insert into public.clients(name, contact_person, phone, whatsapp, email, city, industry, account_manager_id, status, lead_id, notes)
+  insert into public.clients(name, contact_person, phone, whatsapp, email, city, industry, account_manager_id, status, lead_id, notes, salesman_id)
   values (coalesce(nullif(l.company,''), l.name), l.name, l.phone, l.whatsapp, l.email, l.city, l.industry,
-          coalesce(l.owner_id, auth.uid()), 'onboarding', l.id, l.notes)
+          coalesce(l.owner_id, auth.uid()), 'onboarding', l.id, l.notes, coalesce(l.owner_id, auth.uid()))
   returning id into cid;
   update public.leads set stage = 'won', converted_client_id = cid where id = p_lead;
   update public.interactions set client_id = cid where lead_id = p_lead and client_id is null;
@@ -1154,6 +1161,10 @@ do $$ begin
   alter table public.clients add constraint clients_customer_type_chk check (customer_type in ('regular','walkin'));
 exception when duplicate_object then null; end $$;
 alter table public.invoices add column if not exists sale_channel text not null default 'office';   -- 'walkin' = counter sale
+-- who brought this customer: a team member, or someone outside the team (name only)
+alter table public.clients add column if not exists salesman_id uuid references public.profiles(id) on delete set null;
+alter table public.clients add column if not exists salesman_name text;
+create index if not exists idx_clients_salesman on public.clients(salesman_id);
 alter table public.payments add column if not exists collected_by uuid references public.profiles(id) on delete set null;
 alter table public.payments alter column collected_by set default auth.uid();
 update public.payments set collected_by = created_by where collected_by is null and created_by is not null;
@@ -1186,8 +1197,11 @@ begin
 end $$;
 
 -- create a walk-in invoice and (optionally) collect payment in one step
+drop function if exists public.walkin_sale(uuid, text, text, jsonb, numeric, numeric, text, text, text);
 create or replace function public.walkin_sale(p_client_id uuid, p_name text, p_phone text, p_items jsonb,
-  p_discount numeric default 0, p_paid numeric default 0, p_method text default 'Cash', p_reference text default null, p_notes text default null)
+  p_discount numeric default 0, p_paid numeric default 0, p_method text default 'Cash', p_reference text default null, p_notes text default null,
+  p_whatsapp text default null, p_email text default null, p_city text default null, p_address text default null,
+  p_salesman_id uuid default null, p_salesman_name text default null)
 returns jsonb language plpgsql security definer set search_path = public as $$
 declare cid uuid := p_client_id; inv public.invoices; st public.settings;
 begin
@@ -1207,9 +1221,15 @@ begin
       select id into cid from public.clients where customer_type = 'walkin' and public.phone_key(phone) = public.phone_key(p_phone) limit 1;
     end if;
     if cid is null then
-      insert into public.clients(name, contact_person, phone, whatsapp, customer_type, status, account_manager_id)
-      values (trim(p_name), trim(p_name), nullif(trim(p_phone), ''), nullif(trim(p_phone), ''), 'walkin', 'active', auth.uid())
+      insert into public.clients(name, contact_person, phone, whatsapp, email, city, address, customer_type, status, account_manager_id, salesman_id, salesman_name)
+      values (trim(p_name), trim(p_name), nullif(trim(p_phone), ''), coalesce(nullif(trim(p_whatsapp), ''), nullif(trim(p_phone), '')),
+              nullif(trim(p_email), ''), nullif(trim(p_city), ''), nullif(trim(p_address), ''), 'walkin', 'active', auth.uid(), p_salesman_id, nullif(trim(p_salesman_name), ''))
       returning id into cid;
+    else
+      update public.clients set whatsapp = coalesce(whatsapp, nullif(trim(p_whatsapp), '')), email = coalesce(email, nullif(trim(p_email), '')),
+        city = coalesce(city, nullif(trim(p_city), '')), address = coalesce(address, nullif(trim(p_address), '')),
+        salesman_id = coalesce(salesman_id, p_salesman_id), salesman_name = coalesce(salesman_name, nullif(trim(p_salesman_name), ''))
+      where id = cid;
     end if;
   end if;
   select * into st from public.settings where id = 1;
@@ -1227,8 +1247,9 @@ end $$;
 
 -- add (or find by mobile) a walk-in customer from any client picker (any team member)
 drop function if exists public.walkin_customer(text, text);
+drop function if exists public.walkin_customer(text, text, text, text, text, text);
 create or replace function public.walkin_customer(p_name text, p_phone text default null, p_whatsapp text default null,
-  p_email text default null, p_city text default null, p_address text default null)
+  p_email text default null, p_city text default null, p_address text default null, p_salesman_id uuid default null, p_salesman_name text default null)
 returns uuid language plpgsql security definer set search_path = public as $$
 declare cid uuid;
 begin
@@ -1238,20 +1259,21 @@ begin
     select id into cid from public.clients where customer_type = 'walkin' and public.phone_key(phone) = public.phone_key(p_phone) limit 1;
   end if;
   if cid is null then
-    insert into public.clients(name, contact_person, phone, whatsapp, email, city, address, customer_type, status, account_manager_id)
+    insert into public.clients(name, contact_person, phone, whatsapp, email, city, address, customer_type, status, account_manager_id, salesman_id, salesman_name)
     values (trim(p_name), trim(p_name), nullif(trim(p_phone), ''), coalesce(nullif(trim(p_whatsapp), ''), nullif(trim(p_phone), '')),
-            nullif(trim(p_email), ''), nullif(trim(p_city), ''), nullif(trim(p_address), ''), 'walkin', 'active', auth.uid())
+            nullif(trim(p_email), ''), nullif(trim(p_city), ''), nullif(trim(p_address), ''), 'walkin', 'active', auth.uid(), p_salesman_id, nullif(trim(p_salesman_name), ''))
     returning id into cid;
   else
     -- returning customer: fill in details we didn't have before, never overwrite
     update public.clients set
       whatsapp = coalesce(whatsapp, nullif(trim(p_whatsapp), '')), email = coalesce(email, nullif(trim(p_email), '')),
-      city = coalesce(city, nullif(trim(p_city), '')), address = coalesce(address, nullif(trim(p_address), ''))
+      city = coalesce(city, nullif(trim(p_city), '')), address = coalesce(address, nullif(trim(p_address), '')),
+      salesman_id = coalesce(salesman_id, p_salesman_id), salesman_name = coalesce(salesman_name, nullif(trim(p_salesman_name), ''))
     where id = cid;
   end if;
   return cid;
 end $$;
-grant execute on function public.walkin_customer(text, text, text, text, text, text) to authenticated;
+grant execute on function public.walkin_customer(text, text, text, text, text, text, uuid, text) to authenticated;
 
 -- collect the balance of a walk-in invoice later (any team member)
 create or replace function public.walkin_collect(p_invoice uuid, p_amount numeric, p_method text default 'Cash', p_reference text default null)
@@ -1267,7 +1289,7 @@ begin
   return (select total - amount_paid from public.invoices where id = inv.id);
 end $$;
 grant execute on function public.walkin_find(text) to authenticated;
-grant execute on function public.walkin_sale(uuid, text, text, jsonb, numeric, numeric, text, text, text) to authenticated;
+grant execute on function public.walkin_sale(uuid, text, text, jsonb, numeric, numeric, text, text, text, text, text, text, text, uuid, text) to authenticated;
 grant execute on function public.walkin_collect(uuid, numeric, text, text) to authenticated;
 
 -- ---------------------------------------------------------------------
@@ -1532,6 +1554,19 @@ alter table public.quotations add column if not exists full_proposal boolean not
 alter table public.quotations add column if not exists subject text;
 alter table public.quotations add column if not exists responsibilities text;
 alter table public.quotations add column if not exists exclusions text;
+
+-- ---------------------------------------------------------------------
+-- 10h. ONE-TIME DATA CHANGES (each runs once, even if this script is re-run)
+-- ---------------------------------------------------------------------
+create table if not exists public.schema_changes (id text primary key, applied_at timestamptz not null default now());
+alter table public.schema_changes enable row level security;
+do $$ begin
+  if not exists (select 1 from public.schema_changes where id = 'money-view-2026-10') then
+    -- money values are now visible only with "See prices & money": give it to the Finance role
+    update public.roles set permissions = array_append(permissions, 'money.view') where key = 'finance' and not ('money.view' = any(permissions));
+    insert into public.schema_changes(id) values ('money-view-2026-10');
+  end if;
+end $$;
 
 -- every money movement in one place (in = client payments, out = supplier payments + expenses)
 create or replace view public.v_money_movements with (security_invoker = true) as

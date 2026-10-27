@@ -66,6 +66,8 @@ git push -u origin main staging
 
 **Team & Access → Roles & permissions**: create any role (e.g. *Social Media Executive*, *Video Editor*, *Accounts Assistant*) and tick exactly what it can see and do — leads, clients, packages, design tasks, proof approval, calendar, quotations, invoices, payments, expenses, suppliers, each report, user management and settings. Four starting roles are provided (Administrator, Digital Marketer, Graphic Designer, Finance) and can be edited or duplicated; Administrator always keeps full access.
 
+**Money is private.** Prices, fees, deal values and totals are visible only to roles with **See prices & money** (Administrator always; Finance by default). Every finance permission — quotations, invoices, payments, expenses, suppliers, P&L and client-profitability reports — works only together with it, and the database enforces this. Everyone else sees no amounts anywhere, except on **Walk-in sale** and the receipts they create or collect themselves.
+
 **Team & Access → Users**: create a login, pick its role, and record **monthly salary**, **working days** and **working hours**. Cost per hour is calculated automatically (salary ÷ monthly working hours) and feeds client profitability. Salaries are visible only to people who can manage users.
 
 Permissions are enforced inside the database (row-level security), so hiding a menu is never the only protection.
@@ -114,6 +116,10 @@ When someone pays a company cost from their own account (e.g. the Adobe subscrip
 3. Made a mistake? Open **Repayments** and undo it; the expenses become payable again.
 
 Company cash only moves when the repayment is made, so the cash-flow figures stay true to the bank account.
+
+## Salesman (who brought the customer)
+
+Every client and walk-in customer can record a **Salesman / brought by**: a team member, or *Someone else* (an outside agent, typed by name). Clients converted from a lead take the lead owner. Filter the Clients list by salesman, and the client page shows "Brought by …".
 
 ## Walk-in sales (every team member)
 

@@ -8,7 +8,7 @@ import { supabase, q, appLink, DEMO } from '../../lib/supabase'
 import { useData } from '../../lib/hooks'
 import { useAuth } from '../../lib/auth'
 import { CLIENT_STATUS, TASK_STATUSES, INVOICE_STATUS, BILLING_TYPES, PLATFORMS, PROJECT_STATUS, byId } from '../../lib/constants'
-import { money, date, waLink, monthStart, monthEnd, dueLabel, addDays, todayISO } from '../../lib/format'
+import { money, date, waLink, monthStart, monthEnd, dueLabel, addDays, todayISO, showMoney } from '../../lib/format'
 import {
   Button, Badge, StatusBadge, Member, Modal, Field, Input, Select, Textarea, Chips, Tabs, Card, Stat, Loading, ErrorBox, Empty,
   Progress, useAction, useForm, useToast, IconBtn
@@ -23,7 +23,7 @@ import { MoneyFlow } from '../finance/Suppliers'
 export default function ClientDetail() {
   const { id } = useParams()
   const nav = useNavigate()
-  const { has } = useAuth()
+  const { has, member } = useAuth()
   const [tab, setTab] = useState('overview')
   const [editing, setEditing] = useState(false)
   const { data: c, loading, error, reload } = useData(() => q(supabase.from('clients').select('*').eq('id', id).single()), [id])
@@ -45,7 +45,7 @@ export default function ClientDetail() {
       <div className="page-head">
         <div>
           <div className="row gap-s wrap"><h1>{c.name}</h1><StatusBadge list={CLIENT_STATUS} value={c.status} /><Badge tone="slate">{c.code}</Badge></div>
-          <p className="muted">{[c.industry, c.city, c.contact_person].filter(Boolean).join(' · ')}</p>
+          <p className="muted">{[c.industry, c.city, c.contact_person, (c.salesman_id || c.salesman_name) && `Brought by ${c.salesman_id ? member(c.salesman_id)?.full_name || 'team member' : c.salesman_name}`].filter(Boolean).join(' · ')}</p>
         </div>
         <div className="page-actions">
           {has('calendar.view', 'calendar.manage', 'clients.view', 'clients.manage', 'reports.content') && <SocialReportLink clientId={c.id} />}
@@ -94,7 +94,7 @@ function Overview({ c, goTab }) {
       <div className="stats">
         {has('tasks.view', 'tasks.work', 'tasks.manage') && <Stat label="Open design tasks" value={open.length} sub={overdue.length ? `${overdue.length} overdue` : 'None overdue'} icon={Palette} tone={overdue.length ? 'red' : 'green'} onClick={() => goTab('tasks')} />}
         {has('calendar.view', 'calendar.manage') && <Stat label="Posts planned this month" value={live.length} sub={`${live.filter((p) => p.status === 'published').length} published`} icon={CalendarDays} tone="violet" onClick={() => nav(`/calendar?client=${c.id}`)} />}
-        {has('packages.view', 'packages.manage') && <Stat label="Monthly retainer" value={money(data.packs.reduce((a, p) => a + monthly(p), 0))} sub={`${data.packs.length} active package(s)`} icon={Package} tone="teal" onClick={() => goTab('packages')} />}
+        {showMoney() && has('packages.view', 'packages.manage') && <Stat label="Monthly retainer" value={money(data.packs.reduce((a, p) => a + monthly(p), 0))} sub={`${data.packs.length} active package(s)`} icon={Package} tone="teal" onClick={() => goTab('packages')} />}
         {has('invoices.view', 'invoices.manage') && <Stat label="Outstanding" value={money(due)} sub={`${money(billed)} billed lifetime`} icon={FileText} tone={due > 0 ? 'amber' : 'green'} onClick={() => goTab('invoices')} />}
       </div>
       <div className="grid g-2-1">
@@ -187,13 +187,13 @@ function ClientProjects({ clientId }) {
     <Card title="Campaigns & projects" actions={has('projects.manage') && <Button size="sm" icon={Plus} onClick={() => setEditing({ client_id: clientId })}>New campaign</Button>} pad={false}>
       {loading ? <Loading /> : data.length === 0 ? <Empty icon={Megaphone} title="No campaigns yet" /> : (
         <div className="table-wrap"><table className="table">
-          <thead><tr><th>Name</th><th>Type</th><th>Status</th><th>Dates</th><th className="num">Ad spend</th><th className="num">Leads</th></tr></thead>
+          <thead><tr><th>Name</th><th>Type</th><th>Status</th><th>Dates</th>{showMoney() && <th className="num">Ad spend</th>}<th className="num">Leads</th></tr></thead>
           <tbody>{data.map((p) => (
             <tr key={p.id} className="click" onClick={() => has('projects.manage') && setEditing(p)}>
               <td><div className="cell-title">{p.name}</div><div className="cell-sub">{p.platform}</div></td>
               <td>{p.type}</td><td><StatusBadge list={PROJECT_STATUS} value={p.status} /></td>
               <td className="nowrap">{p.start_date ? date(p.start_date) : '—'} → {p.end_date ? date(p.end_date) : '—'}</td>
-              <td className="num">{money(p.ad_spend)}</td><td className="num">{p.leads_generated || 0}</td>
+              {showMoney() && <td className="num">{money(p.ad_spend)}</td>}<td className="num">{p.leads_generated || 0}</td>
             </tr>))}
           </tbody></table></div>
       )}
@@ -213,7 +213,7 @@ function Packages({ clientId }) {
         <div className="grid g2">
           {data.map((p) => (
             <Card key={p.id} title={p.name} actions={<><Badge tone={p.status === 'active' ? 'green' : 'slate'}>{p.status}</Badge>{has('packages.manage') && <IconBtn icon={Pencil} title="Edit" onClick={() => setEditing(p)} />}</>}>
-              <div className="row between"><span className="stat-value">{money(p.fee)}</span><span className="muted">{byId(BILLING_TYPES, p.billing_type).label}</span></div>
+              <div className="row between"><span className="stat-value">{showMoney() ? money(p.fee) : 'Package'}</span><span className="muted">{byId(BILLING_TYPES, p.billing_type).label}</span></div>
               <div className="grid g4 mt small">
                 <div><div className="muted">Posts</div><b>{p.posts_per_month}</b></div>
                 <div><div className="muted">Carousels</div><b>{p.carousels_per_month}</b></div>
@@ -224,7 +224,7 @@ function Packages({ clientId }) {
                 <dt>Period</dt><dd>{date(p.start_date)} → {p.end_date ? date(p.end_date) : 'ongoing'}</dd>
                 {p.renewal_date && <><dt>Renewal</dt><dd><Badge tone={dueLabel(p.renewal_date).tone}>{date(p.renewal_date)}</Badge></dd></>}
                 <dt>Platforms</dt><dd>{(p.platforms || []).join(', ') || '—'}</dd>
-                {Number(p.ad_budget) > 0 && <><dt>Ad budget</dt><dd>{money(p.ad_budget)} / month (client pays)</dd></>}
+                {showMoney() && Number(p.ad_budget) > 0 && <><dt>Ad budget</dt><dd>{money(p.ad_budget)} / month (client pays)</dd></>}
                 {p.scope_notes && <><dt>Scope</dt><dd className="pre">{p.scope_notes}</dd></>}
               </dl>
             </Card>
@@ -248,6 +248,7 @@ function PackageModal({ pkg, clientId, onClose, onSaved }) {
       const p = { ...f, client_id: clientId, end_date: f.end_date || null, renewal_date: f.renewal_date || null }
       ;['id', 'created_at', 'created_by'].forEach((k) => delete p[k])
       ;['fee', 'ad_budget', 'posts_per_month', 'carousels_per_month', 'reels_per_month', 'stories_per_month', 'billing_day'].forEach((k) => (p[k] = Number(p[k] || 0)))
+      if (!showMoney()) { delete p.fee; delete p.ad_budget }   // people without money access never overwrite the fee
       p.billing_day = Math.min(28, Math.max(1, p.billing_day || 1))
       isNew ? await q(supabase.from('packages').insert(p)) : await q(supabase.from('packages').update(p).eq('id', pkg.id))
       onSaved()
@@ -263,7 +264,7 @@ function PackageModal({ pkg, clientId, onClose, onSaved }) {
       <form id="pkg" className="form f3" onSubmit={save}>
         <Field label="Package name" span={2} required><Input required value={f.name} onChange={set('name')} /></Field>
         <Field label="Status"><Select placeholder={false} options={['active', 'paused', 'ended'].map((x) => ({ id: x, label: x }))} value={f.status} onChange={set('status')} /></Field>
-        <Field label="Fee (₹)" required><Input type="number" step="any" min="0" required value={f.fee} onChange={set('fee')} /></Field>
+        {showMoney() && <Field label="Fee (₹)" required><Input type="number" step="any" min="0" required value={f.fee} onChange={set('fee')} /></Field>}
         <Field label="Billing"><Select placeholder={false} options={BILLING_TYPES} value={f.billing_type} onChange={set('billing_type')} /></Field>
         <Field label="Invoice day of month"><Input type="number" step="any" min="1" max="28" value={f.billing_day} onChange={set('billing_day')} /></Field>
         <Field label="Start date"><Input type="date" value={f.start_date} onChange={set('start_date')} /></Field>
@@ -273,7 +274,7 @@ function PackageModal({ pkg, clientId, onClose, onSaved }) {
         <Field label="Carousels / month"><Input type="number" step="any" min="0" value={f.carousels_per_month} onChange={set('carousels_per_month')} /></Field>
         <Field label="Reels / month"><Input type="number" step="any" min="0" value={f.reels_per_month} onChange={set('reels_per_month')} /></Field>
         <Field label="Stories / month"><Input type="number" step="any" min="0" value={f.stories_per_month} onChange={set('stories_per_month')} /></Field>
-        <Field label="Ad budget / month (₹)" hint="Client's ad spend"><Input type="number" step="any" min="0" value={f.ad_budget} onChange={set('ad_budget')} /></Field>
+        {showMoney() && <Field label="Ad budget / month (₹)" hint="Client's ad spend"><Input type="number" step="any" min="0" value={f.ad_budget} onChange={set('ad_budget')} /></Field>}
         <div />
         <Field label="Platforms" span={3}><Chips options={PLATFORMS} value={f.platforms || []} onChange={set('platforms')} /></Field>
         <Field label="Scope / inclusions" span={3}><Textarea value={f.scope_notes} onChange={set('scope_notes')} placeholder="Community management, monthly report, 1 shoot per month…" /></Field>

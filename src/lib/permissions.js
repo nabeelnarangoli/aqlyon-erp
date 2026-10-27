@@ -20,6 +20,7 @@ export const PERMISSION_GROUPS = [
     ['timesheet.all', 'See everyone’s timesheets']
   ] },
   { id: 'finance', label: 'Finance', perms: [
+    ['money.view', 'See prices & money — fees, values, totals anywhere (needed for every finance permission below)'],
     ['quotations.view', 'See quotations'],
     ['quotations.manage', 'Create / edit quotations'],
     ['invoices.view', 'See invoices'],
@@ -46,8 +47,13 @@ export const PERMISSION_GROUPS = [
 export const ALL_PERMISSIONS = PERMISSION_GROUPS.flatMap((g) => g.perms.map(([k]) => k))
 export const PERM_LABEL = Object.fromEntries(PERMISSION_GROUPS.flatMap((g) => g.perms))
 
+// these only work together with money.view (mirrors has_perm() in the database)
+export const MONEY_PERMS = ['quotations.view', 'quotations.manage', 'invoices.view', 'invoices.manage', 'payments.manage', 'expenses.manage',
+  'suppliers.view', 'suppliers.manage', 'suppliers.pay', 'reports.finance', 'reports.clients']
+
 /** does a permission list grant any of the requested permissions? '*' = everything */
-export const grants = (list, ...want) => !!list && (list.includes('*') || want.some((w) => list.includes(w)))
+export const grants = (list, ...want) => !!list && (list.includes('*')
+  || want.some((w) => list.includes(w) && (!MONEY_PERMS.includes(w) || list.includes('money.view'))))
 
 export const ROLE_COLORS = ['dark', 'green', 'violet', 'amber', 'blue', 'teal', 'orange', 'red', 'slate']
 
@@ -61,7 +67,7 @@ export const DEFAULT_ROLES = [
   { key: 'designer', name: 'Graphic Designer', color: 'violet', description: 'Works on design tasks and uploads proofs',
     permissions: ['clients.view', 'projects.view', 'tasks.view', 'tasks.work', 'calendar.view'] },
   { key: 'finance', name: 'Finance', color: 'amber', description: 'Invoices, payments, expenses and suppliers',
-    permissions: ['clients.view', 'packages.view', 'quotations.view', 'quotations.manage', 'invoices.view', 'invoices.manage', 'payments.manage',
+    permissions: ['money.view', 'clients.view', 'packages.view', 'quotations.view', 'quotations.manage', 'invoices.view', 'invoices.manage', 'payments.manage',
       'expenses.manage', 'suppliers.view', 'suppliers.manage', 'suppliers.pay', 'reports.finance', 'reports.clients'] }
 ]
 
