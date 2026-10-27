@@ -81,9 +81,10 @@ function PnL({ from, to }) {
       Collected: data.pay.filter((x) => x.paid_on.startsWith(k)).reduce((a, x) => a + Number(x.amount), 0),
       Expenses: data.exp.filter((x) => x.spent_on.startsWith(k)).reduce((a, x) => a + Number(x.amount), 0),
       Suppliers: data.sb.filter((x) => x.order_date.startsWith(k)).reduce((a, x) => a + Number(x.total), 0),
-      SupPaid: data.sp.filter((x) => !x.paid_by && x.paid_on.startsWith(k)).reduce((a, x) => a + Number(x.amount), 0),
+      SupPaid: data.sp.filter((x) => x.paid_on.startsWith(k)).reduce((a, x) => a + Number(x.amount), 0),
       // cash actually paid for expenses: company-account expenses + repayments to founders / staff
-      ExpPaid: data.exp.filter((x) => !x.paid_by && x.spent_on.startsWith(k)).reduce((a, x) => a + Number(x.amount), 0) + data.rb.filter((x) => x.paid_on.startsWith(k)).reduce((a, x) => a + Number(x.amount), 0)
+      // spending counts when it happens, whoever paid it; repayments to founders only settle it
+      ExpPaid: data.exp.filter((x) => x.spent_on.startsWith(k)).reduce((a, x) => a + Number(x.amount), 0)
     }
     r.Costs = r.Expenses + r.Suppliers
     r.Profit = r.Invoiced - r.Costs; r.Cash = r.Collected - r.ExpPaid - r.SupPaid
@@ -101,9 +102,9 @@ function PnL({ from, to }) {
         <Stat label="Revenue (invoiced)" value={money(T.Invoiced)} />
         <Stat label="Cash collected" value={money(T.Collected)} tone="teal" />
         <Stat label="Supplier costs" value={money(T.Suppliers)} sub={`${money(T.SupPaid)} paid out`} tone="orange" />
-        <Stat label="Expenses" value={money(T.Expenses)} sub={T.Expenses !== T.ExpPaid ? `${money(T.ExpPaid)} paid out in cash` : undefined} tone="red" />
+        <Stat label="Expenses" value={money(T.Expenses)} tone="red" />
         <Stat label="Profit (accrual)" value={money(profit)} sub={`${pct(profit, T.Invoiced)}% margin`} tone={profit >= 0 ? 'green' : 'red'} />
-        <Stat label="Net cash flow" value={money(cash)} sub="In − expenses − supplier payments" tone="violet" />
+        <Stat label="Net cash flow" value={money(cash)} sub="In − expenses − supplier payments (incl. paid personally)" tone="violet" />
       </div>
       <div className="grid g-2-1">
         <ChartCard title="Monthly revenue, expenses and profit">

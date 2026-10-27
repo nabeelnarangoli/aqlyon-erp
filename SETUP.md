@@ -115,7 +115,7 @@ When someone pays a company cost from their own account (e.g. the Adobe subscrip
    The expenses turn **Paid by <name> · repaid**, and the repayment appears in **Payments & cash flow** as money out on that date.
 3. Made a mistake? Open **Repayments** and undo it; the expenses become payable again.
 
-Company cash only moves when the repayment is made, so the cash-flow figures stay true to the bank account.
+Cash flow counts the spending on the day it happens, whoever paid it, so the business's real net cash flow includes what founders spent. The later repayment is shown as a *Settlement* and does not count again. The Net cash flow card also shows the company account on its own.
 
 ## Salesman (who brought the customer)
 

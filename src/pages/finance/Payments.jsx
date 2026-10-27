@@ -39,10 +39,14 @@ export default function Payments() {
   const exp = useMemo(() => data.exp.filter((e) => (!method || e.method === method) && (!client || e.client_id === client)), [data.exp, method, client])
   const tIn = inc.reduce((a, p) => a + Number(p.amount), 0)
   const outCo = out.filter((p) => !p.paid_by), outOwn = out.filter((p) => p.paid_by)
-  const tSup = outCo.reduce((a, p) => a + Number(p.amount), 0)
+  // business view: money spent on the company counts when it is spent, whoever's account paid it
+  const sum = (xs) => xs.reduce((a, x) => a + Number(x.amount), 0)
+  const tSup = sum(out)
   const reimb = useMemo(() => data.reimb.filter((r) => (!method || r.method === method) && !client), [data.reimb, method, client])
   const expCo = exp.filter((e) => !e.paid_by), expOwn = exp.filter((e) => e.paid_by)
-  const tExp = expCo.reduce((a, e) => a + Number(e.amount), 0) + reimb.reduce((a, r) => a + Number(r.amount), 0)
+  const tExp = sum(exp)
+  const tReimb = sum(reimb)
+  const companyNet = tIn - sum(outCo) - sum(expCo) - tReimb   // what actually moved in the company's own account
   const own = [...outOwn, ...expOwn]
   const tOwn = own.reduce((a, x) => a + Number(x.amount), 0)
   const tOwnDue = own.filter((x) => !x.reimbursement_id).reduce((a, x) => a + Number(x.amount), 0)
@@ -53,13 +57,13 @@ export default function Payments() {
       ...inc.map((p) => ({ id: p.id, d: p.paid_on, dir: 'in', kind: 'Customer payment', who: p.clients?.name, whoLink: p.client_id && `/clients/${p.client_id}`, ref: p.invoices?.number, refLink: p.invoice_id && `/finance/invoices/${p.invoice_id}`, method: p.method + (member(p.collected_by) ? ` · ${member(p.collected_by).full_name.split(' ')[0]}` : ''), note: p.reference, amt: Number(p.amount) })),
       ...out.map((p) => ({ id: p.id, d: p.paid_on, dir: p.paid_by ? 'own' : 'out', own: p.paid_by && ownTag(p), kind: `Supplier · ${p.kind}`, who: p.suppliers?.name, whoLink: `/finance/suppliers/${p.supplier_id}`, forWho: custOf(p), ref: p.supplier_bills?.number, bill: p.supplier_bills?.id, method: p.method, note: p.reference, amt: Number(p.amount) })),
       ...exp.map((e) => ({ id: e.id, d: e.spent_on, dir: e.paid_by ? 'own' : 'out', own: e.paid_by && ownTag(e), kind: `Expense · ${e.category}`, who: e.vendor, whoLink: e.supplier_id && `/finance/suppliers/${e.supplier_id}`, forWho: e.clients?.name, method: e.method, note: e.description, amt: Number(e.amount) })),
-      ...reimb.map((r) => ({ id: r.id, d: r.paid_on, dir: 'out', kind: 'Repaid to founder / staff', who: member(r.person_id)?.full_name || 'Team member', whoLink: '/finance/expenses', method: r.method, note: r.reference || r.note, amt: Number(r.amount) }))
+      ...reimb.map((r) => ({ id: r.id, d: r.paid_on, dir: 'settle', kind: 'Repaid to founder / staff', who: member(r.person_id)?.full_name || 'Team member', whoLink: '/finance/expenses', method: r.method, note: r.reference || r.note, amt: Number(r.amount) }))
     ].sort((a, b) => a.d.localeCompare(b.d) || (a.dir === 'in' ? -1 : 1))
     let bal = 0
-    return rows.map((r) => ({ ...r, bal: (bal += r.dir === 'in' ? r.amt : r.dir === 'out' ? -r.amt : 0) })).reverse()
+    return rows.map((r) => ({ ...r, bal: (bal += r.dir === 'in' ? r.amt : r.dir === 'settle' ? 0 : -r.amt) })).reverse()
   }, [inc, out, exp, reimb, member])
 
-  const csv = () => downloadCSV(`cash-flow-${from}-to-${to}.csv`, [...ledger].reverse().map((r) => ({ date: r.d, type: r.kind, party: r.who, for_customer: r.forWho || '', reference: r.ref || '', method: r.method, money_in: r.dir === 'in' ? r.amt : '', money_out: r.dir === 'out' ? r.amt : '', paid_personally: r.dir === 'own' ? r.amt : '', note: r.own || '', running_balance: r.bal })))
+  const csv = () => downloadCSV(`cash-flow-${from}-to-${to}.csv`, [...ledger].reverse().map((r) => ({ date: r.d, type: r.kind, party: r.who, for_customer: r.forWho || '', reference: r.ref || '', method: r.method, money_in: r.dir === 'in' ? r.amt : '', money_out: r.dir === 'out' || r.dir === 'own' ? r.amt : '', paid_personally: r.dir === 'own' ? 'yes' : '', repayment_to_founder: r.dir === 'settle' ? r.amt : '', note: r.own || '', running_balance: r.bal })))
 
   return (
     <>
@@ -77,10 +81,10 @@ export default function Payments() {
       </div>
       <div className="stats">
         <Stat label="Money in" value={money(tIn)} sub={`${inc.length} customer payments`} icon={ArrowDownLeft} onClick={() => setTab('in')} />
-        <Stat label="Paid to suppliers" value={money(tSup)} sub={`${outCo.length} from company account`} icon={ArrowUpRight} tone="orange" onClick={() => setTab('out')} />
-        <Stat label="Other expenses" value={money(tExp)} sub={`${expCo.length} entries${reimb.length ? ` · ${reimb.length} repayments` : ''}`} icon={Wallet} tone="red" />
-        {own.length > 0 && <Stat label="Paid personally (founder / staff)" value={money(tOwn)} sub={tOwnDue ? `${money(tOwnDue)} still to repay · not in company cash` : 'All repaid'} icon={Wallet} tone="amber" onClick={() => nav('/finance/expenses')} />}
-        <Stat label="Net cash flow" value={money(tIn - tSup - tExp)} icon={Scale} tone={tIn - tSup - tExp >= 0 ? 'teal' : 'red'} onClick={() => setTab('ledger')} />
+        <Stat label="Paid to suppliers" value={money(tSup)} sub={outOwn.length ? `${money(sum(outCo))} company · ${money(sum(outOwn))} paid personally` : `${outCo.length} payments`} icon={ArrowUpRight} tone="orange" onClick={() => setTab('out')} />
+        <Stat label="Other expenses" value={money(tExp)} sub={expOwn.length ? `${money(sum(expCo))} company · ${money(sum(expOwn))} paid personally` : `${exp.length} entries`} icon={Wallet} tone="red" />
+        {own.length > 0 && <Stat label="Paid personally (founder / staff)" value={money(tOwn)} sub={tOwnDue ? `${money(tOwnDue)} still owed to them${tReimb ? ` · ${money(tReimb)} repaid` : ''}` : 'All repaid'} icon={Wallet} tone="amber" onClick={() => nav('/finance/expenses')} />}
+        <Stat label="Net cash flow" value={money(tIn - tSup - tExp)} sub={own.length || tReimb ? `In − all spending (incl. paid personally) · company account alone ${money(companyNet)}` : 'Money in − money out'} icon={Scale} tone={tIn - tSup - tExp >= 0 ? 'teal' : 'red'} onClick={() => setTab('ledger')} />
       </div>
       <Tabs value={tab} onChange={setTab} tabs={[{ id: 'ledger', label: 'All movements', count: ledger.length }, { id: 'in', label: 'Received from customers', count: inc.length }, { id: 'out', label: 'Paid to suppliers', count: out.length }]} />
       {loading ? <Loading /> : tab === 'ledger' ? (
@@ -90,12 +94,12 @@ export default function Payments() {
             <tbody>{ledger.map((r) => (
               <tr key={r.dir + r.id} className={r.bill ? 'click' : ''} onClick={() => r.bill && setBill(r.bill)}>
                 <td className="nowrap">{date(r.d)}</td>
-                <td><Badge tone={r.dir === 'in' ? 'green' : r.dir === 'own' ? 'amber' : r.kind.startsWith('Supplier') ? 'orange' : 'slate'}>{r.dir === 'in' ? '↓ In' : r.dir === 'own' ? '⟲ Personal' : '↑ Out'}</Badge> <span className="small">{r.kind}</span>{r.own && <div className="tiny" style={{ color: 'var(--amber, #b45309)' }}>{r.own} · not from company cash</div>}</td>
+                <td><Badge tone={r.dir === 'in' ? 'green' : r.dir === 'own' ? 'amber' : r.kind.startsWith('Supplier') ? 'orange' : 'slate'}>{r.dir === 'in' ? '↓ In' : r.dir === 'own' ? '↑ Out · personal' : r.dir === 'settle' ? '⇄ Settlement' : '↑ Out'}</Badge> <span className="small">{r.kind}</span>{r.own && <div className="tiny" style={{ color: 'var(--amber, #b45309)' }}>{r.own}</div>}{r.dir === 'settle' && <div className="tiny faint">Repays spending already counted above — doesn't change the total</div>}</td>
                 <td className="cell-title">{r.whoLink ? <Link to={r.whoLink} onClick={(e) => e.stopPropagation()} title="Open account statement">{r.who}</Link> : r.who || '—'}</td>
                 <td className="small">{r.dir === 'in' ? r.who : r.forWho || <span className="faint">—</span>}</td>
                 <td className="small">{r.refLink ? <Link to={r.refLink} onClick={(e) => e.stopPropagation()}>{r.ref}</Link> : r.ref || r.note || '—'}</td>
                 <td className="num" style={{ color: 'var(--green-d)' }}>{r.dir === 'in' ? money2(r.amt) : ''}</td>
-                <td className="num" style={{ color: r.dir === 'own' ? 'var(--text-3)' : 'var(--red)' }}>{r.dir === 'out' ? money2(r.amt) : r.dir === 'own' ? <span title="Paid personally — counts when the company repays">({money2(r.amt)})</span> : ''}</td>
+                <td className="num" style={{ color: r.dir === 'settle' ? 'var(--text-3)' : 'var(--red)' }}>{r.dir === 'out' || r.dir === 'own' ? money2(r.amt) : r.dir === 'settle' ? <span title="Repayment to a founder / staff member — the spending was counted when it happened">({money2(r.amt)})</span> : ''}</td>
                 <td className="num strong">{money2(r.bal)}</td>
               </tr>))}</tbody>
             <tfoot><tr><td colSpan={5}>Total</td><td className="num">{money2(tIn)}</td><td className="num">{money2(tSup + tExp)}</td><td className="num">{money2(tIn - tSup - tExp)}</td></tr></tfoot>
