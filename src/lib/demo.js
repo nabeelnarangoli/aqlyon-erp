@@ -3,7 +3,7 @@ import { DEFAULT_ROLES } from './permissions'
 // database triggers/RPCs from supabase/schema.sql, on sample data kept in localStorage.
 // Only used when the app is built with VITE_DEMO=1.
 
-const KEY = 'aqlyon-erp-demo-v5'
+const KEY = 'aqlyon-erp-demo-v6'
 const SKEY = 'aqlyon-erp-demo-session'
 const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : 'id-' + Math.random().toString(36).slice(2) + Date.now().toString(36))
 const nowISO = () => new Date().toISOString()
@@ -57,7 +57,7 @@ const seq = (name) => { db._seq ||= {}; db._seq[name] = (db._seq[name] || 0) + 1
 /* ---------------------------- defaults ---------------------------- */
 const DEFAULTS = {
   leads: () => ({ stage: 'new', temperature: 'warm', services_interest: [], estimated_value: 0, source: 'Walk-in', created_by: uid(), updated_at: nowISO() }),
-  clients: () => ({ status: 'active', onboarded_on: iso(new Date()), created_by: uid(), updated_at: nowISO() }),
+  clients: () => ({ customer_type: 'regular', status: 'active', onboarded_on: iso(new Date()), created_by: uid(), updated_at: nowISO() }),
   packages: () => ({ billing_type: 'monthly', fee: 0, start_date: iso(new Date()), billing_day: 1, posts_per_month: 0, reels_per_month: 0, stories_per_month: 0, carousels_per_month: 0, ad_budget: 0, platforms: [], status: 'active', created_by: uid() }),
   interactions: () => ({ type: 'call', direction: 'outgoing', done: false, occurred_at: nowISO(), created_by: uid() }),
   projects: () => ({ type: 'Campaign', budget: 0, ad_spend: 0, status: 'planning', reach: 0, impressions: 0, clicks: 0, leads_generated: 0, conversions: 0, owner_id: uid() }),
@@ -70,8 +70,8 @@ const DEFAULTS = {
   content_posts: () => ({ platforms: ['Instagram'], post_type: 'Post', status: 'idea', reach: 0, likes: 0, comments: 0, shares: 0, saves: 0, created_by: uid(), updated_at: nowISO() }),
   approval_links: () => ({ token: uuid().replace(/-/g, '').slice(0, 36), expires_at: new Date(Date.now() + 30 * 86400000).toISOString(), revoked: false, created_by: uid() }),
   quotations: () => ({ issue_date: iso(new Date()), valid_until: day(15), items: [], discount: 0, status: 'draft', created_by: uid() }),
-  invoices: () => ({ issue_date: iso(new Date()), due_date: day(7), items: [], discount: 0, amount_paid: 0, status: 'draft', created_by: uid() }),
-  payments: () => ({ paid_on: iso(new Date()), method: 'UPI', created_by: uid() }),
+  invoices: () => ({ sale_channel: 'office', issue_date: iso(new Date()), due_date: day(7), items: [], discount: 0, amount_paid: 0, status: 'draft', created_by: uid() }),
+  payments: () => ({ paid_on: iso(new Date()), method: 'UPI', created_by: uid(), collected_by: uid() }),
   expenses: () => ({ spent_on: iso(new Date()), category: 'Office Supplies', method: 'UPI', rebillable: false, recurring: false, created_by: uid() }),
   reimbursements: () => ({ paid_on: iso(new Date()), method: 'Bank Transfer', created_by: uid() }),
   notifications: () => ({ read: false }),
@@ -273,7 +273,13 @@ function view(name) {
 function visible(table, rows) {
   const me = uid()
   if (!currentUser) return rows
-  if (READ[table] && !hasPerm(...READ[table])) return []
+  if (READ[table] && !hasPerm(...READ[table])) {
+    // walk-in billing: any team member sees walk-in customers, invoices they billed and money they collected
+    if (table === 'clients') return rows.filter((r) => r.customer_type === 'walkin')
+    if (table === 'invoices' || table === 'v_invoice_status') return rows.filter((r) => (r.sale_channel === 'walkin' && r.created_by === me) || T('payments').some((p) => p.invoice_id === r.id && p.collected_by === me))
+    if (table === 'payments') return rows.filter((r) => r.collected_by === me)
+    return []
+  }
   if (table === 'staff_pay') return hasPerm('team.manage') ? rows : rows.filter((r) => r.user_id === me)
   if (table === 'notifications') return rows.filter((r) => r.user_id === me)
   if (table === 'queries') return rows.filter((r) => hasPerm('*') && permsOf(me).includes('*') || r.from_user === me || r.to_user === me || (r.to_role_id && r.to_role_id === myRoleId()))
@@ -402,6 +408,51 @@ function rpc(name, a) {
   if (!db) load()
   try {
     if (name === 'staff_cost_rates') return { data: hasPerm('team.manage', 'reports.clients', 'reports.team') ? T('staff_pay').map((x) => ({ user_id: x.user_id, cost_per_hour: x.cost_per_hour })) : [], error: null }
+    if (name === 'walkin_find') {
+      const t = String(a.p_q || '').trim(), dg = t.replace(/\D/g, '')
+      if (t.length < 3) return { data: [], error: null }
+      const key = (x) => String(x || '').replace(/\D/g, '').slice(-10)
+      const rows = T('clients').filter((c) => c.customer_type === 'walkin' && ((dg && key(c.phone).includes(dg)) || c.name.toLowerCase().includes(t.toLowerCase()))).map((c) => {
+        const inv = T('invoices').filter((i) => i.client_id === c.id && i.status !== 'cancelled')
+        return { id: c.id, code: c.code, name: c.name, phone: c.phone, visits: inv.length, last_visit: inv.map((i) => i.issue_date).sort().pop() || null,
+          balance: inv.filter((i) => ['sent', 'partial'].includes(i.status)).reduce((x, i) => x + Number(i.total) - Number(i.amount_paid), 0) }
+      }).sort((x, y) => String(y.last_visit).localeCompare(String(x.last_visit))).slice(0, 6)
+      return { data: rows, error: null }
+    }
+    if (name === 'walkin_sale' || name === 'walkin_collect') {
+      const me = uid(); if (!me) throw new Error('Not allowed')
+      const key = (x) => String(x || '').replace(/\D/g, '').slice(-10)
+      const prev = currentUser; currentUser = null   // runs with database rights, like the SQL function
+      try {
+        if (name === 'walkin_collect') {
+          const inv = T('invoices').find((i) => i.id === a.p_invoice && i.sale_channel === 'walkin' && ['sent', 'partial'].includes(i.status))
+          if (!inv) throw new Error('Invoice not found or already paid')
+          const bal = Number(inv.total) - Number(inv.amount_paid)
+          if (!(Number(a.p_amount) > 0) || Number(a.p_amount) > bal + 0.01) throw new Error(`Enter an amount up to the balance (${bal})`)
+          new Query('payments').insert({ invoice_id: inv.id, client_id: inv.client_id, amount: Number(a.p_amount), method: a.p_method || 'Cash', reference: a.p_reference || null, note: 'Walk-in counter', created_by: me, collected_by: me }).exec()
+          return { data: Number(inv.total) - Number(inv.amount_paid), error: null }
+        }
+        const items = a.p_items || []
+        if (!items.length) throw new Error('Add at least one item')
+        let cid = a.p_client_id
+        if (!cid) {
+          if (!String(a.p_name || '').trim()) throw new Error('Enter the customer name')
+          if (key(a.p_phone).length >= 10) cid = T('clients').find((c) => c.customer_type === 'walkin' && key(c.phone) === key(a.p_phone))?.id
+          if (!cid) {
+            const { data: c } = new Query('clients').insert({ name: a.p_name.trim(), contact_person: a.p_name.trim(), phone: a.p_phone || null, whatsapp: a.p_phone || null, customer_type: 'walkin', status: 'active', account_manager_id: me, created_by: me }).exec()
+            cid = (Array.isArray(c) ? c[0] : c).id
+          }
+        }
+        const { data: iv } = new Query('invoices').insert({ client_id: cid, issue_date: iso(new Date()), due_date: iso(new Date()), items, discount: Number(a.p_discount) || 0, status: 'sent', sale_channel: 'walkin', notes: a.p_notes || null, terms: settings().invoice_terms, created_by: me }).exec()
+        const inv = Array.isArray(iv) ? iv[0] : iv
+        if (Number(a.p_paid) > 0) {
+          if (Number(a.p_paid) > Number(inv.total) + 0.01) throw new Error('Amount received is more than the invoice total')
+          new Query('payments').insert({ invoice_id: inv.id, client_id: cid, amount: Number(a.p_paid), method: a.p_method || 'Cash', reference: a.p_reference || null, note: 'Walk-in counter', created_by: me, collected_by: me }).exec()
+        }
+        const fin = T('invoices').find((i) => i.id === inv.id)
+        return { data: { invoice_id: fin.id, number: fin.number, client_id: cid, total: fin.total, paid: fin.amount_paid }, error: null }
+      } finally { currentUser = prev }
+    }
     if (name === 'repay_expenses') {
       if (!hasPerm('expenses.manage', 'payments.manage')) throw new Error('Not allowed')
       const ids = a.p_expense_ids || [], sids = a.p_supplier_payment_ids || []
@@ -666,6 +717,8 @@ function seed() {
   ins('supplier_bill_allocations', { bill_id: printPO.id, client_id: c3.id, invoice_id: T('invoices').find((i) => i.client_id === c3.id)?.id, amount: 3500 })
   ins('supplier_bill_allocations', { bill_id: printPO.id, client_id: c1.id, amount: 4500 })
   ins('supplier_payments', { bill_id: printPO.id, paid_on: day(-4), amount: 4000, kind: 'advance', method: 'Cash', note: '50% advance' })
+  as(d1)
+  rpc('walkin_sale', { p_name: 'Rasheed K', p_phone: '9847012345', p_items: [{ description: 'Visiting card design', qty: 1, rate: 800 }, { description: 'Printing 100 nos', qty: 1, rate: 450 }], p_discount: 50, p_paid: 1000, p_method: 'Cash' })
   as(mk)
   ins('quotations', { lead_id: hashim.id, bill_to: 'Hashim Electronics\nKoyilandy\n9447000001', items: [{ description: 'Social Media Management – Starter (12 posts)', qty: 1, rate: 8000 }, { description: 'Meta Ads Management', qty: 1, rate: 6000 }], discount: 1000, status: 'sent' })
 

@@ -18,7 +18,7 @@ export function Button({ variant = 'primary', size, icon: Icon, loading, childre
   )
 }
 export function IconBtn({ icon: Icon, title, className, size = 16, ...p }) {
-  return <button className={cx('icon-btn', className)} title={title} aria-label={title} {...p}><Icon size={size} /></button>
+  return <button type="button" className={cx('icon-btn', className)} title={title} aria-label={title} {...p}><Icon size={size} /></button>
 }
 
 /* ---------- Badges / avatar ---------- */

@@ -1146,6 +1146,104 @@ begin
 end $$;
 grant execute on function public.repay_expenses(uuid, uuid[], date, text, text, text, uuid[]) to authenticated;
 
+-- ---------------------------------------------------------------------
+-- 10d. WALK-IN SALES (counter billing by any team member)
+--   Walk-in customers are clients with customer_type = 'walkin'; a repeat
+--   visitor is matched by phone. Every payment records who collected it.
+-- ---------------------------------------------------------------------
+alter table public.clients  add column if not exists customer_type text not null default 'regular';
+do $$ begin
+  alter table public.clients add constraint clients_customer_type_chk check (customer_type in ('regular','walkin'));
+exception when duplicate_object then null; end $$;
+alter table public.invoices add column if not exists sale_channel text not null default 'office';   -- 'walkin' = counter sale
+alter table public.payments add column if not exists collected_by uuid references public.profiles(id) on delete set null;
+alter table public.payments alter column collected_by set default auth.uid();
+update public.payments set collected_by = created_by where collected_by is null and created_by is not null;
+create index if not exists idx_pay_collector on public.payments(collected_by, paid_on);
+create index if not exists idx_inv_channel on public.invoices(sale_channel, created_by) where sale_channel = 'walkin';
+
+create or replace function public.phone_key(t text) returns text language sql immutable as $$
+  select nullif(right(regexp_replace(coalesce(t, ''), '\D', '', 'g'), 10), '')
+$$;
+create index if not exists idx_clients_phone_key on public.clients(public.phone_key(phone));
+
+-- find a returning walk-in customer by phone or name (any team member)
+create or replace function public.walkin_find(p_q text)
+returns table(id uuid, code text, name text, phone text, visits bigint, last_visit date, balance numeric)
+language plpgsql stable security definer set search_path = public as $$
+begin
+  if not public.is_staff() then raise exception 'Not allowed'; end if;
+  if length(trim(coalesce(p_q, ''))) < 3 then return; end if;
+  return query
+    select c.id, c.code, c.name, c.phone,
+           (select count(*) from public.invoices i where i.client_id = c.id and i.status <> 'cancelled'),
+           (select max(i.issue_date) from public.invoices i where i.client_id = c.id),
+           (select coalesce(sum(i.total - i.amount_paid), 0) from public.invoices i where i.client_id = c.id and i.status in ('sent','partial'))
+    from public.clients c
+    where c.customer_type = 'walkin'
+      and (public.phone_key(c.phone) like '%' || regexp_replace(p_q, '\D', '', 'g') || '%' and regexp_replace(p_q, '\D', '', 'g') <> ''
+           or c.name ilike '%' || trim(p_q) || '%')
+    order by 6 desc nulls last
+    limit 6;
+end $$;
+
+-- create a walk-in invoice and (optionally) collect payment in one step
+create or replace function public.walkin_sale(p_client_id uuid, p_name text, p_phone text, p_items jsonb,
+  p_discount numeric default 0, p_paid numeric default 0, p_method text default 'Cash', p_reference text default null, p_notes text default null)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare cid uuid := p_client_id; inv public.invoices; st public.settings;
+begin
+  if not public.is_staff() then raise exception 'Not allowed'; end if;
+  if p_items is null or jsonb_typeof(p_items) <> 'array' or jsonb_array_length(p_items) = 0 then raise exception 'Add at least one item'; end if;
+  if exists (select 1 from jsonb_array_elements(p_items) i where coalesce(nullif(trim(i->>'description'), ''), '') = ''
+             or coalesce((i->>'qty')::numeric, 0) <= 0 or coalesce((i->>'rate')::numeric, -1) < 0) then
+    raise exception 'Each item needs a description, quantity and rate';
+  end if;
+  if cid is not null then
+    if not exists (select 1 from public.clients where id = cid and (customer_type = 'walkin' or public.has_perm('invoices.manage', 'clients.view', 'clients.manage'))) then
+      raise exception 'Customer not found';
+    end if;
+  else
+    if coalesce(trim(p_name), '') = '' then raise exception 'Enter the customer name'; end if;
+    if public.phone_key(p_phone) is not null and length(public.phone_key(p_phone)) >= 10 then
+      select id into cid from public.clients where customer_type = 'walkin' and public.phone_key(phone) = public.phone_key(p_phone) limit 1;
+    end if;
+    if cid is null then
+      insert into public.clients(name, contact_person, phone, whatsapp, customer_type, status, account_manager_id)
+      values (trim(p_name), trim(p_name), nullif(trim(p_phone), ''), nullif(trim(p_phone), ''), 'walkin', 'active', auth.uid())
+      returning id into cid;
+    end if;
+  end if;
+  select * into st from public.settings where id = 1;
+  insert into public.invoices(client_id, issue_date, due_date, items, discount, status, sale_channel, notes, terms)
+  values (cid, current_date, current_date, p_items, greatest(coalesce(p_discount, 0), 0), 'sent', 'walkin', nullif(trim(p_notes), ''), st.invoice_terms)
+  returning * into inv;
+  if coalesce(p_paid, 0) > 0 then
+    if p_paid > inv.total + 0.01 then raise exception 'Amount received (%) is more than the invoice total (%)', p_paid, inv.total; end if;
+    insert into public.payments(invoice_id, client_id, amount, method, reference, note, collected_by)
+    values (inv.id, cid, p_paid, coalesce(p_method, 'Cash'), nullif(trim(p_reference), ''), 'Walk-in counter', auth.uid());
+  end if;
+  select * into inv from public.invoices where id = inv.id;
+  return jsonb_build_object('invoice_id', inv.id, 'number', inv.number, 'client_id', cid, 'total', inv.total, 'paid', inv.amount_paid);
+end $$;
+
+-- collect the balance of a walk-in invoice later (any team member)
+create or replace function public.walkin_collect(p_invoice uuid, p_amount numeric, p_method text default 'Cash', p_reference text default null)
+returns numeric language plpgsql security definer set search_path = public as $$
+declare inv public.invoices;
+begin
+  if not public.is_staff() then raise exception 'Not allowed'; end if;
+  select * into inv from public.invoices where id = p_invoice and sale_channel = 'walkin' and status in ('sent','partial');
+  if inv.id is null then raise exception 'Invoice not found or already paid'; end if;
+  if coalesce(p_amount, 0) <= 0 or p_amount > inv.total - inv.amount_paid + 0.01 then raise exception 'Enter an amount up to the balance (%)', inv.total - inv.amount_paid; end if;
+  insert into public.payments(invoice_id, client_id, amount, method, reference, note, collected_by)
+  values (inv.id, inv.client_id, p_amount, coalesce(p_method, 'Cash'), nullif(trim(p_reference), ''), 'Walk-in counter', auth.uid());
+  return (select total - amount_paid from public.invoices where id = inv.id);
+end $$;
+grant execute on function public.walkin_find(text) to authenticated;
+grant execute on function public.walkin_sale(uuid, text, text, jsonb, numeric, numeric, text, text, text) to authenticated;
+grant execute on function public.walkin_collect(uuid, numeric, text, text) to authenticated;
+
 -- every money movement in one place (in = client payments, out = supplier payments + expenses)
 create or replace view public.v_money_movements with (security_invoker = true) as
 select p.id, p.paid_on as on_date, 'in'::text as direction, 'Client payment'::text as kind, p.amount, p.method, p.reference, p.note,
@@ -1234,6 +1332,7 @@ grant execute on function public.portal_decide(text, text, uuid, text, text) to 
 -- ---------------------------------------------------------------------
 -- 12. REPORTING VIEWS (security_invoker → respect RLS of caller)
 -- ---------------------------------------------------------------------
+drop view if exists public.v_invoice_status;   -- rebuilt: invoices gains columns over time
 create or replace view public.v_invoice_status with (security_invoker = true) as
 select i.*, c.name as client_name,
        (i.total - i.amount_paid) as balance,
@@ -1308,7 +1407,8 @@ create policy p_inter_rw   on public.interactions for all to authenticated
 
 -- clients (staff with any working permission can see names; full list needs clients.view)
 create policy p_clients_read  on public.clients for select to authenticated
-  using (public.has_perm('clients.view', 'clients.manage', 'tasks.view', 'tasks.work', 'invoices.view', 'quotations.view', 'calendar.view', 'suppliers.view', 'leads.manage'));
+  using (public.has_perm('clients.view', 'clients.manage', 'tasks.view', 'tasks.work', 'invoices.view', 'quotations.view', 'calendar.view', 'suppliers.view', 'leads.manage')
+         or (customer_type = 'walkin' and public.is_staff()));
 create policy p_clients_write on public.clients for insert to authenticated with check (public.has_perm('clients.manage', 'leads.manage'));
 create policy p_clients_upd   on public.clients for update to authenticated using (public.has_perm('clients.manage'));
 create policy p_clients_del   on public.clients for delete to authenticated using (public.is_admin());
@@ -1370,10 +1470,12 @@ create policy p_links on public.approval_links for all to authenticated
 -- finance
 create policy p_quote_read on public.quotations for select to authenticated using (public.has_perm('quotations.view', 'quotations.manage'));
 create policy p_quote_rw   on public.quotations for all to authenticated using (public.has_perm('quotations.manage')) with check (public.has_perm('quotations.manage'));
-create policy p_inv_read on public.invoices for select to authenticated using (public.has_perm('invoices.view', 'invoices.manage', 'payments.manage'));
+create policy p_inv_read on public.invoices for select to authenticated using (public.has_perm('invoices.view', 'invoices.manage', 'payments.manage')
+  or (sale_channel = 'walkin' and created_by = auth.uid())
+  or exists (select 1 from public.payments p where p.invoice_id = invoices.id and p.collected_by = auth.uid()));
 create policy p_inv_rw   on public.invoices for all to authenticated using (public.has_perm('invoices.manage')) with check (public.has_perm('invoices.manage'));
 create policy p_inv_paid on public.invoices for update to authenticated using (public.has_perm('payments.manage'));  -- mark sent when recording a payment
-create policy p_pay_read on public.payments for select to authenticated using (public.has_perm('payments.manage', 'invoices.view', 'invoices.manage', 'reports.finance'));
+create policy p_pay_read on public.payments for select to authenticated using (public.has_perm('payments.manage', 'invoices.view', 'invoices.manage', 'reports.finance') or collected_by = auth.uid());
 create policy p_pay_rw   on public.payments for all to authenticated using (public.has_perm('payments.manage')) with check (public.has_perm('payments.manage'));
 create policy p_exp_read on public.expenses for select to authenticated using (public.has_perm('expenses.manage', 'payments.manage', 'reports.finance', 'reports.clients') or paid_by = auth.uid());
 create policy p_reimb_read on public.reimbursements for select to authenticated using (public.has_perm('expenses.manage', 'payments.manage', 'reports.finance') or person_id = auth.uid());

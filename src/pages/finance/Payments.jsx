@@ -6,7 +6,7 @@ import { useAuth } from '../../lib/auth'
 import { useData, useLocal } from '../../lib/hooks'
 import { PAYMENT_METHODS } from '../../lib/constants'
 import { money, money2, date, monthStart, monthEnd, downloadCSV } from '../../lib/format'
-import { PageHeader, Button, Stat, Select, ClientSelect, Input, Loading, Empty, Badge, Tabs } from '../../components/ui'
+import { PageHeader, Button, Stat, Select, ClientSelect, MemberSelect, Input, Loading, Empty, Badge, Tabs } from '../../components/ui'
 import { PaymentModal } from './Invoices'
 import { WorkOrderView } from './Suppliers'
 
@@ -16,6 +16,7 @@ export default function Payments() {
   const [to, setTo] = useState(monthEnd())
   const [method, setMethod] = useState('')
   const [client, setClient] = useState('')
+  const [by, setBy] = useState('')
   const [adding, setAdding] = useState(false)
   const [bill, setBill] = useState(null)
   const { member } = useAuth()
@@ -31,7 +32,7 @@ export default function Payments() {
   }, [from, to], { inc: [], out: [], exp: [], reimb: [] })
 
   const custOf = (p) => (p.supplier_bills?.supplier_bill_allocations || []).map((a) => a.clients?.name).filter(Boolean).join(', ')
-  const inc = useMemo(() => data.inc.filter((p) => (!method || p.method === method) && (!client || p.client_id === client)), [data.inc, method, client])
+  const inc = useMemo(() => data.inc.filter((p) => (!method || p.method === method) && (!client || p.client_id === client) && (!by || p.collected_by === by)), [data.inc, method, client, by])
   const out = useMemo(() => data.out.filter((p) => (!method || p.method === method) && (!client || (p.supplier_bills?.supplier_bill_allocations || []).some((a) => a.client_id === client))), [data.out, method, client])
   const exp = useMemo(() => data.exp.filter((e) => (!method || e.method === method) && (!client || e.client_id === client)), [data.exp, method, client])
   const tIn = inc.reduce((a, p) => a + Number(p.amount), 0)
@@ -41,7 +42,7 @@ export default function Payments() {
 
   const ledger = useMemo(() => {
     const rows = [
-      ...inc.map((p) => ({ id: p.id, d: p.paid_on, dir: 'in', kind: 'Customer payment', who: p.clients?.name, whoLink: p.client_id && `/clients/${p.client_id}`, ref: p.invoices?.number, refLink: p.invoice_id && `/finance/invoices/${p.invoice_id}`, method: p.method, note: p.reference, amt: Number(p.amount) })),
+      ...inc.map((p) => ({ id: p.id, d: p.paid_on, dir: 'in', kind: 'Customer payment', who: p.clients?.name, whoLink: p.client_id && `/clients/${p.client_id}`, ref: p.invoices?.number, refLink: p.invoice_id && `/finance/invoices/${p.invoice_id}`, method: p.method + (member(p.collected_by) ? ` · ${member(p.collected_by).full_name.split(' ')[0]}` : ''), note: p.reference, amt: Number(p.amount) })),
       ...out.map((p) => ({ id: p.id, d: p.paid_on, dir: 'out', kind: `Supplier · ${p.kind}`, who: p.suppliers?.name, whoLink: `/finance/suppliers/${p.supplier_id}`, forWho: custOf(p), ref: p.supplier_bills?.number, bill: p.supplier_bills?.id, method: p.method, note: p.reference, amt: Number(p.amount) })),
       ...exp.map((e) => ({ id: e.id, d: e.spent_on, dir: 'out', kind: `Expense · ${e.category}`, who: e.vendor, whoLink: e.supplier_id && `/finance/suppliers/${e.supplier_id}`, forWho: e.clients?.name, method: e.method, note: e.description, amt: Number(e.amount) })),
       ...reimb.map((r) => ({ id: r.id, d: r.paid_on, dir: 'out', kind: 'Repaid to founder / staff', who: member(r.person_id)?.full_name || 'Team member', whoLink: '/finance/expenses', method: r.method, note: r.reference || r.note, amt: Number(r.amount) }))
@@ -66,6 +67,7 @@ export default function Payments() {
         <Input type="date" value={to} onChange={(e) => setTo(e.target.value)} style={{ width: 160 }} />
         <ClientSelect value={client} onChange={(v) => setClient(v || '')} placeholder="All customers" includeInactive />
         <Select options={PAYMENT_METHODS} value={method} onChange={(v) => setMethod(v || '')} placeholder="All methods" />
+        {tab === 'in' && <MemberSelect value={by} onChange={(v) => setBy(v || '')} placeholder="Received by anyone" />}
       </div>
       <div className="stats">
         <Stat label="Money in" value={money(tIn)} sub={`${inc.length} customer payments`} icon={ArrowDownLeft} onClick={() => setTab('in')} />
@@ -95,14 +97,14 @@ export default function Payments() {
       ) : tab === 'in' ? (
         inc.length === 0 ? <Empty icon={Wallet} title="No customer payments in this period" /> : (
           <div className="card table-wrap"><table className="table">
-            <thead><tr><th>Date</th><th>Customer</th><th>Invoice</th><th>Method</th><th>Reference</th><th className="num">Amount</th></tr></thead>
+            <thead><tr><th>Date</th><th>Customer</th><th>Invoice</th><th>Method</th><th>Received by</th><th>Reference</th><th className="num">Amount</th></tr></thead>
             <tbody>{inc.map((p) => (
               <tr key={p.id}>
                 <td className="nowrap">{date(p.paid_on)}</td><td className="cell-title">{p.client_id ? <Link to={`/clients/${p.client_id}`}>{p.clients?.name}</Link> : '—'}</td>
                 <td>{p.invoice_id ? <Link to={`/finance/invoices/${p.invoice_id}`}>{p.invoices?.number}</Link> : <Badge tone="amber">On account</Badge>}</td>
-                <td>{p.method}</td><td className="small muted">{p.reference || p.note || '—'}</td><td className="num strong">{money2(p.amount)}</td>
+                <td>{p.method}</td><td className="small">{member(p.collected_by)?.full_name || '—'}</td><td className="small muted">{p.reference || p.note || '—'}</td><td className="num strong">{money2(p.amount)}</td>
               </tr>))}</tbody>
-            <tfoot><tr><td colSpan={5}>Total</td><td className="num">{money2(tIn)}</td></tr></tfoot>
+            <tfoot><tr><td colSpan={6}>Total</td><td className="num">{money2(tIn)}</td></tr></tfoot>
           </table></div>
         )
       ) : (

@@ -7,7 +7,7 @@ import { useAuth } from '../../lib/auth'
 import { CLIENT_STATUS, INDUSTRIES } from '../../lib/constants'
 import { money, downloadCSV, date } from '../../lib/format'
 import {
-  PageHeader, Button, StatusBadge, Member, Modal, Field, Input, Select, Textarea, MemberSelect, SearchInput,
+  PageHeader, Button, Badge, StatusBadge, Member, Modal, Field, Input, Select, Textarea, MemberSelect, SearchInput,
   Loading, ErrorBox, Empty, useAction, useForm, invalidateClients
 } from '../../components/ui'
 
@@ -16,6 +16,7 @@ export default function Clients() {
   const nav = useNavigate()
   const [search, setSearch] = useState('')
   const [status, setStatus] = useState('current')
+  const [ctype, setCtype] = useState('')
   const [am, setAm] = useState('')
   const [adding, setAdding] = useState(false)
   const { data, loading, error, reload } = useData(async () => {
@@ -34,8 +35,8 @@ export default function Clients() {
   const rows = useMemo(() => data.filter((c) => {
     const s = search.toLowerCase()
     return (!s || [c.name, c.contact_person, c.phone, c.code, c.city, c.industry].some((v) => v?.toLowerCase().includes(s)))
-      && (!status || (status === 'current' ? ['active', 'onboarding'].includes(c.status) : c.status === status)) && (!am || c.account_manager_id === am)
-  }), [data, search, status, am])
+      && (!status || (status === 'current' ? ['active', 'onboarding'].includes(c.status) : c.status === status)) && (!am || c.account_manager_id === am) && (!ctype || (c.customer_type || 'regular') === ctype)
+  }), [data, search, status, am, ctype])
   const totalMrr = rows.reduce((a, c) => a + c.mrr, 0)
 
   return (
@@ -48,6 +49,7 @@ export default function Clients() {
       <div className="filters">
         <SearchInput value={search} onChange={setSearch} placeholder="Search clients…" />
         <Select options={[{ id: 'current', label: 'Active + onboarding' }, ...CLIENT_STATUS]} value={status} onChange={(v) => setStatus(v || '')} placeholder="All statuses" />
+        <Select options={[{ id: 'regular', label: 'Regular clients' }, { id: 'walkin', label: 'Walk-in customers' }]} value={ctype} onChange={(v) => setCtype(v || '')} placeholder="All customer types" />
         <MemberSelect perm={['leads.manage', 'clients.manage']} value={am} onChange={(v) => setAm(v || '')} placeholder="All account managers" />
       </div>
       <ErrorBox error={error} onRetry={reload} />
@@ -58,7 +60,7 @@ export default function Clients() {
             <tbody>
               {rows.map((c) => (
                 <tr key={c.id} className="click" onClick={() => nav(`/clients/${c.id}`)}>
-                  <td><div className="cell-title">{c.name}</div><div className="cell-sub">{c.code}{c.city ? ` · ${c.city}` : ''}</div></td>
+                  <td><div className="cell-title">{c.name}</div><div className="cell-sub">{c.code}{c.city ? ` · ${c.city}` : ''}{c.customer_type === 'walkin' && <> · <Badge tone="violet">Walk-in</Badge></>}</div></td>
                   <td><div>{c.contact_person || '—'}</div><div className="cell-sub">{c.phone}</div></td>
                   <td>{c.industry || '—'}</td>
                   <td><StatusBadge list={CLIENT_STATUS} value={c.status} /></td>

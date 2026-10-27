@@ -115,6 +115,16 @@ When someone pays a company cost from their own account (e.g. the Adobe subscrip
 
 Company cash only moves when the repayment is made, so the cash-flow figures stay true to the bank account.
 
+## Walk-in sales (every team member)
+
+**Walk-in sale** (top of the menu, for everyone):
+1. Type the customer's mobile number. If they have bought from you before, they appear: tap to reuse their details. Otherwise enter a name and they are saved as a *Walk-in* customer.
+2. Add items (the price list suggests names and rates), any discount, and the amount received with method (Cash / UPI / Card…).
+3. **Create invoice & collect** makes the invoice, records the payment against the person who collected it, and opens the receipt for Print or WhatsApp.
+4. A part-paid walk-in invoice can be settled later with **Collect balance**.
+
+Each person sees their own walk-in sales and "You collected today" (by method) for cash handover. Finance sees everything under **Payments → Received from customers**, with a **Received by** column and filter. Walk-in customers are listed under **Clients** (filter *Walk-in customers*).
+
 ## Updating the database later
 
 When a new version of `supabase/schema.sql` ships, run it again in the SQL Editor — it only adds or replaces what changed and keeps your data.

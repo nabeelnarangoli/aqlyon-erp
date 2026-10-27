@@ -6,15 +6,17 @@ import { useData } from '../../lib/hooks'
 import { useAuth } from '../../lib/auth'
 import { INVOICE_STATUS, QUOTE_STATUS } from '../../lib/constants'
 import { money2, date, amountInWords, waLink, todayISO, addDays } from '../../lib/format'
-import { Button, StatusBadge, Card, Loading, ErrorBox, IconBtn, useAction, useToast } from '../../components/ui'
+import { Button, Badge, StatusBadge, Card, Loading, ErrorBox, IconBtn, useAction, useToast } from '../../components/ui'
 import DocEditor from './DocEditor'
 import { PaymentModal } from './Invoices'
 import { MoneyFlow } from './Suppliers'
+import { CollectModal } from './WalkIn'
 
 export default function InvoiceView({ kind }) {
   const { id } = useParams()
   const nav = useNavigate()
-  const { settings, has } = useAuth()
+  const { settings, has, member } = useAuth()
+  const [collecting, setCollecting] = useState(false)
   const { confirm } = useToast()
   const [editing, setEditing] = useState(false)
   const [paying, setPaying] = useState(null)
@@ -36,7 +38,9 @@ export default function InvoiceView({ kind }) {
   const setStatus = (status, msg) => run(async () => { await q(supabase.from(table).update({ status }).eq('id', id)); doc.reload() }, msg)
   const share = () => {
     const phone = c?.whatsapp || c?.phone
-    const text = kind === 'invoice'
+    const text = kind === 'invoice' && d.status === 'paid'
+      ? `Hello ${c?.contact_person || c?.name || ''},\n\nThank you for your payment of ${money2(d.amount_paid)} for invoice ${d.number} (${(d.items || []).map((i) => i.description).join(', ')}).\n\n— ${st.company_name}${st.phone ? `\n${st.phone}` : ''}`
+      : kind === 'invoice'
       ? `Hello ${c?.contact_person || c?.name || ''},\n\nPlease find invoice ${d.number} from ${st.company_name} for ${money2(d.total)}${balance < d.total ? ` (balance ${money2(balance)})` : ''}, due on ${date(d.due_date)}.${st.upi_id ? `\n\nUPI: ${st.upi_id}` : ''}${st.bank_details ? `\n\nBank details:\n${st.bank_details}` : ''}\n\nThank you!`
       : `Hello ${c?.contact_person || ''},\n\nSharing our quotation ${d.number} for ${money2(d.total)}, valid until ${date(d.valid_until)}. Happy to discuss any changes.\n\n— ${st.company_name}`
     window.open(waLink(phone, text), '_blank')
@@ -76,6 +80,7 @@ export default function InvoiceView({ kind }) {
       <div className="row between wrap gap-s mb no-print">
         <button className="btn btn-ghost btn-sm" onClick={() => nav(-1)}><ArrowLeft size={14} />Back</button>
         <div className="row gap-s wrap">
+          {d.sale_channel === 'walkin' && <Badge tone="violet">Walk-in sale</Badge>}
           <StatusBadge list={kind === 'invoice' ? INVOICE_STATUS : QUOTE_STATUS} value={d.status} />
           {!DEMO && <Button variant="outline" icon={Printer} onClick={() => window.print()}>Print / PDF</Button>}
           {(c?.whatsapp || c?.phone) && <Button variant="outline" icon={MessageCircle} onClick={share}>WhatsApp</Button>}
@@ -85,6 +90,7 @@ export default function InvoiceView({ kind }) {
           {kind === 'quote' && has('invoices.manage') && d.status !== 'rejected' && <Button icon={FileCheck2} onClick={toInvoice} loading={busy}>Accept → Invoice</Button>}
           {kind === 'quote' && !has('invoices.manage') && canEdit && d.status !== 'accepted' && <Button icon={CheckCircle2} onClick={() => setStatus('accepted', 'Marked accepted — finance can invoice it')}>Accepted</Button>}
           {kind === 'invoice' && isFin && !['paid', 'cancelled'].includes(d.status) && <Button icon={Wallet} onClick={() => setPaying({})}>Record payment</Button>}
+          {kind === 'invoice' && !isFin && d.sale_channel === 'walkin' && ['sent', 'partial'].includes(d.status) && <Button icon={Wallet} onClick={() => setCollecting(true)}>Collect balance</Button>}
           {canEdit && !['paid', 'cancelled'].includes(d.status) && <Button variant="dark" icon={Pencil} onClick={() => setEditing(true)}>Edit</Button>}
           {kind === 'invoice' && isFin && !['cancelled', 'paid'].includes(d.status) && Number(d.amount_paid) === 0 && <IconBtn icon={Ban} title="Cancel invoice" onClick={() => setStatus('cancelled', 'Invoice cancelled')} />}
           {canEdit && (d.status === 'draft' || d.status === 'cancelled' || kind === 'quote') && <IconBtn icon={Trash2} title="Delete" onClick={del} />}
@@ -129,6 +135,9 @@ export default function InvoiceView({ kind }) {
           {kind === 'invoice' && Number(d.amount_paid) > 0 && <><div><span>Paid</span><span>{money2(d.amount_paid)}</span></div><div className="strong"><span>Balance due</span><span>{money2(balance)}</span></div></>}
         </div>
         <p className="small" style={{ marginTop: 10 }}><b>Amount in words:</b> {amountInWords(d.total)}</p>
+        {kind === 'invoice' && pays.data.length > 0 && (
+          <p className="small" style={{ marginTop: 6 }}><b>Received:</b> {pays.data.map((p) => `${money2(p.amount)} by ${p.method} on ${date(p.paid_on)}${p.collected_by && member(p.collected_by) ? ` (received by ${member(p.collected_by).full_name})` : ''}`).join('; ')}</p>
+        )}
         {d.notes && <p className="small pre" style={{ marginTop: 14 }}>{d.notes}</p>}
         <div className="grid g2" style={{ marginTop: 26, gap: 24 }}>
           {kind === 'invoice' && (st.bank_details || st.upi_id) && <div className="small"><b>Payment details</b><div className="pre" style={{ marginTop: 4, color: '#444' }}>{st.bank_details}{st.upi_id && `\nUPI: ${st.upi_id}`}</div></div>}
@@ -137,11 +146,12 @@ export default function InvoiceView({ kind }) {
         <div className="center tiny" style={{ marginTop: 36, color: '#999', borderTop: '1px solid #eee', paddingTop: 12 }}>Thank you for choosing {st.company_name}. This is a computer-generated document.</div>
       </div>
 
+      {collecting && <CollectModal inv={d} onClose={() => setCollecting(false)} onDone={() => { setCollecting(false); pays.reload(); doc.reload() }} />}
       {kind === 'invoice' && pays.data.length > 0 && (
         <Card className="mt-l no-print" title="Payments received" style={{ maxWidth: 820, margin: '20px auto 0' }}>
           <div className="list">{pays.data.map((p) => (
             <div key={p.id} className="list-item">
-              <div className="grow"><b>{money2(p.amount)}</b> <span className="muted">via {p.method}{p.reference && ` · ${p.reference}`}</span>{p.note && <div className="small faint">{p.note}</div>}</div>
+              <div className="grow"><b>{money2(p.amount)}</b> <span className="muted">via {p.method}{p.reference && ` · ${p.reference}`}</span>{p.collected_by && <span className="small"> · collected by <b>{member(p.collected_by)?.full_name || 'team member'}</b></span>}{p.note && <div className="small faint">{p.note}</div>}</div>
               <span className="muted">{date(p.paid_on)}</span>
               {isFin && <IconBtn icon={Pencil} size={14} title="Edit" onClick={() => setPaying(p)} />}
               {isFin && <IconBtn icon={Trash2} size={14} title="Remove" onClick={() => delPay(p)} />}

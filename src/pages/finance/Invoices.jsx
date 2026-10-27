@@ -7,7 +7,7 @@ import { useAuth } from '../../lib/auth'
 import { INVOICE_STATUS, PAYMENT_METHODS } from '../../lib/constants'
 import { money, money2, date, monthStart, monthEnd, todayISO, downloadCSV } from '../../lib/format'
 import {
-  PageHeader, Button, Badge, StatusBadge, Stat, Modal, Field, Input, Select, Textarea, ClientSelect, SearchInput, Loading, Empty,
+  PageHeader, Button, Badge, StatusBadge, Stat, Modal, Field, Input, Select, Textarea, ClientSelect, MemberSelect, SearchInput, Loading, Empty,
   useAction, useForm, useToast
 } from '../../components/ui'
 import DocEditor from './DocEditor'
@@ -96,12 +96,13 @@ export default function Invoices() {
 
 export function PaymentModal({ invoice, payment, onClose, onSaved }) {
   const isNew = !payment?.id
+  const { user } = useAuth()
   const balance = invoice ? Number(invoice.total) - Number(invoice.amount_paid) : 0
-  const [f, set] = useForm({ invoice_id: invoice?.id || '', client_id: invoice?.client_id || '', paid_on: todayISO(), amount: balance > 0 ? balance : '', method: 'UPI', reference: '', note: '', ...payment })
+  const [f, set] = useForm({ invoice_id: invoice?.id || '', client_id: invoice?.client_id || '', paid_on: todayISO(), amount: balance > 0 ? balance : '', method: 'UPI', reference: '', note: '', collected_by: user?.id || '', ...payment })
   const invs = useData(() => (invoice ? [] : q(supabase.from('v_invoice_status').select('id,number,client_id,client_name,balance').in('status', ['sent', 'partial', 'draft']).order('issue_date'))), [], [])
   const [busy, run] = useAction()
   const save = (e) => { e.preventDefault(); run(async () => {
-    const p = { invoice_id: f.invoice_id || null, client_id: f.client_id || null, paid_on: f.paid_on, amount: Number(f.amount), method: f.method, reference: f.reference || null, note: f.note || null }
+    const p = { invoice_id: f.invoice_id || null, client_id: f.client_id || null, paid_on: f.paid_on, amount: Number(f.amount), method: f.method, reference: f.reference || null, note: f.note || null, collected_by: f.collected_by || null }
     if (!(p.amount > 0)) throw new Error('Enter an amount')
     if (invoice && invoice.status === 'draft') await q(supabase.from('invoices').update({ status: 'sent' }).eq('id', invoice.id))
     isNew ? await q(supabase.from('payments').insert(p)) : await q(supabase.from('payments').update(p).eq('id', payment.id))
@@ -117,6 +118,7 @@ export function PaymentModal({ invoice, payment, onClose, onSaved }) {
         <Field label="Amount (₹)" required><Input type="number" min="0" step="any" required value={f.amount} onChange={set('amount')} /></Field>
         <Field label="Received on"><Input type="date" value={f.paid_on} onChange={set('paid_on')} /></Field>
         <Field label="Method"><Select placeholder={false} options={PAYMENT_METHODS} value={f.method} onChange={set('method')} /></Field>
+        <Field label="Money received by" hint="Who has the cash / whose account it came into"><MemberSelect value={f.collected_by} onChange={set('collected_by')} placeholder="—" /></Field>
         <Field label="Reference" hint="UPI ref / cheque no. / transaction ID"><Input value={f.reference} onChange={set('reference')} /></Field>
         <Field label="Note"><Textarea rows={2} value={f.note} onChange={set('note')} /></Field>
       </form>

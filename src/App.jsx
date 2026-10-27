@@ -19,6 +19,7 @@ const TaskDetail = lazy(() => import('./pages/tasks/TaskDetail'))
 const Calendar = lazy(() => import('./pages/tasks/Calendar'))
 const Timesheet = lazy(() => import('./pages/tasks/Timesheet'))
 const Queries = lazy(() => import('./pages/tasks/Queries'))
+const WalkIn = lazy(() => import('./pages/finance/WalkIn'))
 const Invoices = lazy(() => import('./pages/finance/Invoices'))
 const InvoiceView = lazy(() => import('./pages/finance/InvoiceView'))
 const Quotations = lazy(() => import('./pages/finance/Quotations'))
@@ -85,7 +86,9 @@ function Gate() {
           <Route path="queries" element={<Queries />} />
           <Route path="queries/:id" element={<Queries />} />
           <Route path="finance/invoices" element={<Guard perm={['invoices.view', 'invoices.manage']}><Invoices /></Guard>} />
-          <Route path="finance/invoices/:id" element={<Guard perm={['invoices.view', 'invoices.manage']}><InvoiceView kind="invoice" /></Guard>} />
+          {/* any team member may open an invoice they billed or collected for (walk-in); the database decides what they can see */}
+          <Route path="finance/invoices/:id" element={<InvoiceView kind="invoice" />} />
+          <Route path="walkin" element={<WalkIn />} />
           <Route path="finance/quotations" element={<Guard perm={['quotations.view', 'quotations.manage']}><Quotations /></Guard>} />
           <Route path="finance/quotations/:id" element={<Guard perm={['quotations.view', 'quotations.manage']}><InvoiceView kind="quote" /></Guard>} />
           <Route path="finance/payments" element={<Guard perm={['payments.manage']}><Payments /></Guard>} />

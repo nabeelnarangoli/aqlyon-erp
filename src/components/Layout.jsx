@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import {
   LayoutDashboard, Target, Building2, PhoneCall, Megaphone, Palette, CalendarDays, MessagesSquare,
-  FileText, FileSignature, Wallet, Receipt, BarChart3, Users, Settings, LogOut, Bell, Menu, Clock, CheckCheck, Truck, Store
+  FileText, FileSignature, Wallet, Receipt, BarChart3, Users, Settings, LogOut, Bell, Menu, Clock, CheckCheck, Truck, Store, ShoppingBag
 } from 'lucide-react'
 import { useAuth } from '../lib/auth'
 import { supabase, q, DEMO } from '../lib/supabase'
@@ -14,7 +14,8 @@ import { Avatar, IconBtn, SearchInput, Badge, cx } from './ui'
 
 const NAV = [
   { group: null, items: [
-    { to: '/', label: 'Dashboard', icon: LayoutDashboard, perm: [], end: true }
+    { to: '/', label: 'Dashboard', icon: LayoutDashboard, perm: [], end: true },
+    { to: '/walkin', label: 'Walk-in sale', icon: ShoppingBag, perm: [] }
   ] },
   { group: 'CRM', items: [
     { to: '/leads', label: 'Leads & Pipeline', icon: Target, perm: ['leads.view', 'leads.manage'] },
