@@ -1,10 +1,11 @@
 import { useState } from 'react'
 import { CheckCircle2 } from 'lucide-react'
-import { supabase, DEMO } from '../lib/supabase'
+import { supabase, DEMO, getRemember, setRemember, rememberedLogin, saveLogin } from '../lib/supabase'
 import { Button, Field, Input } from '../components/ui'
 
 export default function Login() {
-  const [email, setEmail] = useState('')
+  const [email, setEmail] = useState(() => (getRemember() ? rememberedLogin() : ''))
+  const [remember, setRem] = useState(getRemember)
   const [password, setPassword] = useState('')
   const [mode, setMode] = useState('login') // login | forgot
   const [busy, setBusy] = useState(false)
@@ -14,6 +15,7 @@ export default function Login() {
     e.preventDefault()
     setBusy(true); setMsg(null)
     if (mode === 'login') {
+      setRemember(remember); saveLogin(remember ? email.trim() : '')
       const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password })
       if (error) setMsg({ type: 'error', text: error.message === 'Invalid login credentials' ? DEMO ? 'Wrong username or password.' : 'Wrong email or password.' : error.message })
     } else {
@@ -47,7 +49,13 @@ export default function Login() {
           </div>
           {msg && <div className={`alert ${msg.type === 'error' ? 'alert-error' : 'alert-ok'}`}>{msg.text}</div>}
           <><Field label={DEMO ? 'Username' : 'Email'}><Input type={DEMO ? 'text' : 'email'} autoComplete="username" required value={email} onChange={(e) => setEmail(e.target.value)} /></Field>
-          {mode === 'login' && <Field label="Password"><Input type="password" autoComplete="current-password" required value={password} onChange={(e) => setPassword(e.target.value)} /></Field>}
+          {mode === 'login' && <Field label="Password"><Input type="password" autoComplete="current-password" required value={password} onChange={(e) => setPassword(e.target.value)} autoFocus={!!email} /></Field>}
+          {mode === 'login' && (
+            <label className="check" title="Untick on shared or public computers">
+              <input type="checkbox" checked={remember} onChange={(e) => setRem(e.target.checked)} />
+              Remember me <span className="tiny faint">— stay signed in on this device</span>
+            </label>
+          )}
           <Button type="submit" size="lg" loading={busy}>{mode === 'login' ? 'Sign in' : 'Send reset link'}</Button>
           <button type="button" className="btn btn-ghost btn-sm" onClick={() => { setMode(mode === 'login' ? 'forgot' : 'login'); setMsg(null) }}>
             {mode === 'login' ? 'Forgot password?' : '← Back to sign in'}

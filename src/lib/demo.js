@@ -6,6 +6,8 @@ import { QUOTE_TERMS, PROPOSAL_INTRO, CLIENT_RESPONSIBILITIES, PROPOSAL_EXCLUSIO
 
 const KEY = 'aqlyon-erp-demo-v14'
 const SKEY = 'aqlyon-erp-demo-session'
+// same "Remember me" rule as the real app: remembered → localStorage, otherwise this browser session only
+const sessStore = () => { try { return localStorage.getItem('aqlyon-remember') !== '0' ? localStorage : sessionStorage } catch { return sessionStorage } }
 const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : 'id-' + Math.random().toString(36).slice(2) + Date.now().toString(36))
 const nowISO = () => new Date().toISOString()
 const iso = (d) => { const x = new Date(d); return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}-${String(x.getDate()).padStart(2, '0')}` }
@@ -602,10 +604,10 @@ export const demoClient = {
       const p = T('profiles').find((x) => x.active && (x.email?.toLowerCase() === login || (x.username || DEMO_USERNAMES[x.id]) === login))
       const pw = p && ((db._pw || {})[p.id] || `${DEMO_USERNAMES[p.id]}@123`)
       if (!p || password !== pw) return { error: { message: 'Invalid login credentials' } }
-      currentUser = p; try { sessionStorage.setItem(SKEY, p.id) } catch { /* ignore */ }
+      currentUser = p; try { localStorage.removeItem(SKEY); sessionStorage.removeItem(SKEY); sessStore().setItem(SKEY, p.id) } catch { /* ignore */ }
       emit('SIGNED_IN'); return { data: { session: sessionFor(p) }, error: null }
     },
-    signOut: async () => { currentUser = null; try { sessionStorage.removeItem(SKEY) } catch { /* ignore */ } emit('SIGNED_OUT'); return { error: null } },
+    signOut: async () => { currentUser = null; try { sessionStorage.removeItem(SKEY); localStorage.removeItem(SKEY) } catch { /* ignore */ } emit('SIGNED_OUT'); return { error: null } },
     resetPasswordForEmail: async () => ({ error: null })
   },
   storage: {
@@ -640,7 +642,7 @@ export const demoFileUrls = (ids) => Object.fromEntries(ids.map((id) => [id, fil
 ;(function restore() {
   if (import.meta.env.VITE_DEMO !== '1') return
   load()
-  try { const id = sessionStorage.getItem(SKEY); if (id) currentUser = T('profiles').find((p) => p.id === id) || null } catch { /* ignore */ }
+  try { const id = sessionStorage.getItem(SKEY) || localStorage.getItem(SKEY); if (id) currentUser = T('profiles').find((p) => p.id === id) || null } catch { /* ignore */ }
 })()
 
 /* ---------------------------- seed ---------------------------- */
