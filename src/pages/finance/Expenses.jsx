@@ -36,15 +36,22 @@ export default function Expenses() {
   const owedBy = useMemo(() => Object.values(owed.data.reduce((a, e) => { a[e.paid_by] ||= { id: e.paid_by, total: 0, n: 0 }; a[e.paid_by].total += Number(e.amount); a[e.paid_by].n++; return a }, {})).sort((a, b) => b.total - a.total), [owed.data])
   const owedTotal = owedBy.reduce((a, x) => a + x.total, 0)
   // supplier payments made from someone's own account also sit in "payable to founder / staff"
-  const spOwn = useData(() => q(supabase.from('supplier_payments').select('*, suppliers(name), supplier_bills(id,number,title)').not('paid_by', 'is', null).gte('paid_on', from).lte('paid_on', to)), [from, to, data], [])
+  // "Still payable" means everything not yet repaid, from any date — the period filter doesn't apply to it
+  const allDates = show === 'payable'
+  const spOwn = useData(() => {
+    let qq = supabase.from('supplier_payments').select('*, suppliers(name), supplier_bills(id,number,title)').not('paid_by', 'is', null)
+    qq = allDates ? qq.is('reimbursement_id', null) : qq.gte('paid_on', from).lte('paid_on', to)
+    return q(qq)
+  }, [from, to, data, allDates], [])
+  const unpaidExp = useData(() => (allDates ? q(supabase.from('expenses').select('*, clients(name)').not('paid_by', 'is', null).is('reimbursement_id', null).order('spent_on', { ascending: false })) : []), [allDates, data], [])
   const spRows = useMemo(() => spOwn.data.map((p) => ({ id: 'sp' + p.id, sp: true, bill_id: p.bill_id, spent_on: p.paid_on, category: 'Supplier payment', vendor: p.suppliers?.name, supplier_id: p.supplier_id,
     description: [p.supplier_bills?.number, p.supplier_bills?.title, p.kind].filter(Boolean).join(' · '), amount: p.amount, method: p.method, paid_by: p.paid_by, reimbursement_id: p.reimbursement_id })), [spOwn.data])
   const rows = useMemo(() => {
-    const base = data.filter((e) => (!cat || e.category === cat) && (!show || (show === 'payable' ? e.paid_by && !e.reimbursement_id : show === 'own' ? e.paid_by : !e.paid_by)))
+    const base = (allDates ? unpaidExp.data : data).filter((e) => (!cat || e.category === cat) && (!show || (show === 'payable' ? e.paid_by && !e.reimbursement_id : show === 'own' ? e.paid_by : !e.paid_by)))
     if (show !== 'own' && show !== 'payable') return base
     const extra = spRows.filter((e) => (!cat || cat === 'Supplier payment') && (show === 'own' || !e.reimbursement_id))
     return [...base, ...extra].sort((a, b) => b.spent_on.localeCompare(a.spent_on))
-  }, [data, cat, show, spRows])
+  }, [data, cat, show, spRows, allDates, unpaidExp.data])
   const [order, setOrder] = useState(null)
   const total = rows.reduce((a, e) => a + Number(e.amount), 0)
   const byPayee = useMemo(() => Object.values(data.filter((e) => e.supplier_id).reduce((a, e) => {
@@ -90,7 +97,8 @@ export default function Expenses() {
       </div>
       <div className="grid g-2-1">
         <div>
-          {loading ? <Loading /> : rows.length === 0 ? <Empty icon={Receipt} title="No expenses in this period" /> : (
+          {allDates && <div className="alert mb" style={{ background: 'var(--surface-2)' }}>Showing <b>everything still owed</b> to founders / staff, from any date — the date filter doesn't apply here.</div>}
+          {loading ? <Loading /> : rows.length === 0 ? <Empty icon={Receipt} title={allDates ? 'Nothing is owed to founders / staff' : 'No expenses in this period'} /> : (
             <div className="card table-wrap"><table className="table">
               <thead><tr><th>Date</th><th>Category</th><th>Details</th><th>Method</th><th className="num">Amount</th><th /></tr></thead>
               <tbody>{rows.map((e) => (
