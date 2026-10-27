@@ -70,7 +70,7 @@ export default function DocEditor({ kind, doc = {}, onClose, onSaved }) {
         <Button variant="ghost" onClick={onClose}>Cancel</Button><Button form="doc" type="submit" loading={busy}>Save</Button></>}>
       <form id="doc" onSubmit={save}>
         <div className="form f3">
-          <Field label="Client" required={kind === 'invoice'}><ClientSelect value={f.client_id} onChange={set('client_id')} placeholder={kind === 'quote' ? 'Existing client (optional)' : 'Select client…'} /></Field>
+          <Field label="Client" required={kind === 'invoice'}><ClientSelect allowCreate value={f.client_id} onChange={set('client_id')} placeholder={kind === 'quote' ? 'Existing client (optional)' : 'Select client…'} /></Field>
           <Field label={kind === 'invoice' ? 'Invoice date' : 'Quote date'}><Input type="date" value={f.issue_date} onChange={set('issue_date')} /></Field>
           {kind === 'invoice'
             ? <Field label="Due date"><Input type="date" value={f.due_date} onChange={set('due_date')} /></Field>

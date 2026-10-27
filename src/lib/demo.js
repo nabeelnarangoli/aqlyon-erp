@@ -419,6 +419,18 @@ function rpc(name, a) {
       }).sort((x, y) => String(y.last_visit).localeCompare(String(x.last_visit))).slice(0, 6)
       return { data: rows, error: null }
     }
+    if (name === 'walkin_customer') {
+      const me = uid(); if (!me) throw new Error('Not allowed')
+      if (!String(a.p_name || '').trim()) throw new Error('Enter the customer name')
+      const key = (x) => String(x || '').replace(/\D/g, '').slice(-10)
+      const hit = key(a.p_phone).length >= 10 && T('clients').find((c) => c.customer_type === 'walkin' && key(c.phone) === key(a.p_phone))
+      if (hit) return { data: hit.id, error: null }
+      const prev = currentUser; currentUser = null
+      try {
+        const { data: c } = new Query('clients').insert({ name: a.p_name.trim(), contact_person: a.p_name.trim(), phone: a.p_phone || null, whatsapp: a.p_phone || null, customer_type: 'walkin', status: 'active', account_manager_id: me, created_by: me }).exec()
+        return { data: (Array.isArray(c) ? c[0] : c).id, error: null }
+      } finally { currentUser = prev }
+    }
     if (name === 'walkin_sale' || name === 'walkin_collect') {
       const me = uid(); if (!me) throw new Error('Not allowed')
       const key = (x) => String(x || '').replace(/\D/g, '').slice(-10)

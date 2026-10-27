@@ -211,4 +211,8 @@ select pg_temp.as_user('00000000-0000-0000-0000-00000000000b');
 select 'marketer (invoices.view) sees walk-in invoices' t, count(*) from invoices where sale_channel='walkin';
 reset role;
 select 'finance sees collector' t, p.amount, pr.email from payments p join profiles pr on pr.id = p.collected_by join invoices i on i.id = p.invoice_id where i.sale_channel='walkin' order by p.amount;
+select pg_temp.as_user('00000000-0000-0000-0000-00000000000c');
+select 'walkin_customer reuses by phone' t, walkin_customer('Someone', '98470-12345') = (select id from clients where customer_type='walkin' limit 1);
+select 'walkin_customer creates new' t, walkin_customer('Fresh Visitor', '9000000001') is not null;
+reset role;
 select 'ALL TESTS PASSED' as result;

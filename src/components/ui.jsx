@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { X, Loader2, AlertTriangle, CheckCircle2, Info, Search, Inbox } from 'lucide-react'
+import { X, Loader2, AlertTriangle, CheckCircle2, Info, Search, Inbox, Plus } from 'lucide-react'
 import { initials } from '../lib/format'
 import { useAuth } from '../lib/auth'
 import { useData } from '../lib/hooks'
@@ -157,16 +157,55 @@ let clientCache = null
 export function useClients() {
   return useData(async () => {
     if (clientCache && Date.now() - clientCache.t < 30000) return clientCache.d
-    const d = await q(supabase.from('clients').select('id, name, code, status, account_manager_id, phone, contact_person').order('name'))
+    const d = await q(supabase.from('clients').select('id, name, code, status, account_manager_id, phone, contact_person, customer_type').order('name'))
     clientCache = { t: Date.now(), d }
     return d
   }, [], [])
 }
 export const invalidateClients = () => { clientCache = null }
-export function ClientSelect({ value, onChange, placeholder = 'Select client…', includeInactive }) {
-  const { data } = useClients()
-  const opts = (data || []).filter((c) => includeInactive || c.status !== 'churned' || c.id === value).map((c) => ({ id: c.id, label: c.name }))
-  return <Select options={opts} value={value} onChange={onChange} placeholder={placeholder} />
+export function ClientSelect({ value, onChange, placeholder = 'Select client…', includeInactive, allowCreate }) {
+  const { data, reload } = useClients()
+  const [adding, setAdding] = useState(false)
+  const list = (data || []).filter((c) => includeInactive || c.status !== 'churned' || c.id === value)
+  const label = (c) => c.customer_type === 'walkin' ? `${c.name} · Walk-in${c.phone ? ` · ${c.phone}` : ''}` : c.name
+  const opts = [...list.filter((c) => c.customer_type !== 'walkin'), ...list.filter((c) => c.customer_type === 'walkin')].map((c) => ({ id: c.id, label: label(c) }))
+  const sel = <Select options={opts} value={value} onChange={onChange} placeholder={placeholder} />
+  if (!allowCreate) return sel
+  return (
+    <>
+      <div className="row gap-xs">{sel}<IconBtn icon={Plus} title="New customer" onClick={() => setAdding(true)} /></div>
+      {adding && <NewCustomerModal onClose={() => setAdding(false)} onSaved={(id) => { setAdding(false); invalidateClients(); reload(); onChange(id) }} />}
+    </>
+  )
+}
+
+// quick-create a customer from any client picker: walk-in (any team member) or regular client (client managers)
+export function NewCustomerModal({ onClose, onSaved }) {
+  const { has } = useAuth()
+  const canRegular = has('clients.manage', 'leads.manage')
+  const [f, set] = useForm({ type: 'walkin', name: '', phone: '', contact_person: '' })
+  const [busy, run] = useAction()
+  const save = (e) => { e.preventDefault(); e.stopPropagation(); run(async () => {   // stop: this form sits inside other forms (React events bubble through portals)
+    if (!f.name.trim()) throw new Error('Enter the customer name')
+    const id = f.type === 'walkin'
+      ? await q(supabase.rpc('walkin_customer', { p_name: f.name.trim(), p_phone: f.phone || null }))
+      : (await q(supabase.from('clients').insert({ name: f.name.trim(), contact_person: f.contact_person || f.name.trim(), phone: f.phone || null, whatsapp: f.phone || null, status: 'active', customer_type: 'regular' }).select('id').single())).id
+    onSaved(id)
+  }, 'Customer added') }
+  return (
+    <Modal open size="sm" onClose={onClose} title="New customer"
+      footer={<><Button variant="ghost" onClick={onClose}>Cancel</Button><Button form="newcust" type="submit" loading={busy}>Add customer</Button></>}>
+      <form id="newcust" className="form f1" onSubmit={save}>
+        <Field label="Customer type">
+          <Select placeholder={false} value={f.type} onChange={set('type')}
+            options={[{ id: 'walkin', label: 'Walk-in customer' }, ...(canRegular ? [{ id: 'regular', label: 'Regular client (business account)' }] : [])]} />
+        </Field>
+        <Field label={f.type === 'walkin' ? 'Name' : 'Business / brand name'} required><Input value={f.name} onChange={set('name')} autoFocus /></Field>
+        {f.type === 'regular' && <Field label="Contact person"><Input value={f.contact_person} onChange={set('contact_person')} /></Field>}
+        <Field label="Mobile number" hint={f.type === 'walkin' ? 'If this number is already saved, that customer is used instead of a duplicate' : undefined}><Input type="tel" value={f.phone} onChange={set('phone')} /></Field>
+      </form>
+    </Modal>
+  )
 }
 
 /** small form state helper */

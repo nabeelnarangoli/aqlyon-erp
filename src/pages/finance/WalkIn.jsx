@@ -81,7 +81,7 @@ export default function WalkIn() {
               <Button type="button" size="sm" variant={mode === 'client' ? 'primary' : 'ghost'} onClick={() => setMode('client')}>Existing client</Button>
             </div>)}>
             {mode === 'client' ? (
-              <div className="form f1"><Field label="Client"><ClientSelect value={clientId} onChange={(v) => setClientId(v || '')} /></Field></div>
+              <div className="form f1"><Field label="Client"><ClientSelect allowCreate value={clientId} onChange={(v) => setClientId(v || '')} /></Field></div>
             ) : cust.id ? (
               <div className="row between wrap gap-s" style={{ padding: '10px 12px', background: 'var(--green-50)', borderRadius: 10 }}>
                 <div><Badge tone="green"><Repeat2 size={12} /> Returning customer</Badge> <b>{cust.name}</b> <span className="muted small">{cust.phone}</span></div>

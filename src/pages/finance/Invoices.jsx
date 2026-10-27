@@ -114,7 +114,7 @@ export function PaymentModal({ invoice, payment, onClose, onSaved }) {
       footer={<><Button variant="ghost" onClick={onClose}>Cancel</Button><Button form="pay" type="submit" loading={busy}>Save payment</Button></>}>
       <form id="pay" className="form f1" onSubmit={save}>
         {!invoice && <Field label="Against invoice"><Select options={invs.data.map((i) => ({ id: i.id, label: `${i.number} · ${i.client_name} · ${money(i.balance)} due` }))} value={f.invoice_id} onChange={pick} placeholder="No invoice (advance / on account)" /></Field>}
-        {!invoice && !f.invoice_id && <Field label="Client"><ClientSelect value={f.client_id} onChange={set('client_id')} /></Field>}
+        {!invoice && !f.invoice_id && <Field label="Client"><ClientSelect allowCreate value={f.client_id} onChange={set('client_id')} /></Field>}
         <Field label="Amount (₹)" required><Input type="number" min="0" step="any" required value={f.amount} onChange={set('amount')} /></Field>
         <Field label="Received on"><Input type="date" value={f.paid_on} onChange={set('paid_on')} /></Field>
         <Field label="Method"><Select placeholder={false} options={PAYMENT_METHODS} value={f.method} onChange={set('method')} /></Field>

@@ -1227,6 +1227,25 @@ begin
   return jsonb_build_object('invoice_id', inv.id, 'number', inv.number, 'client_id', cid, 'total', inv.total, 'paid', inv.amount_paid);
 end $$;
 
+-- add (or find by mobile) a walk-in customer from any client picker (any team member)
+create or replace function public.walkin_customer(p_name text, p_phone text default null)
+returns uuid language plpgsql security definer set search_path = public as $$
+declare cid uuid;
+begin
+  if not public.is_staff() then raise exception 'Not allowed'; end if;
+  if coalesce(trim(p_name), '') = '' then raise exception 'Enter the customer name'; end if;
+  if length(coalesce(public.phone_key(p_phone), '')) >= 10 then
+    select id into cid from public.clients where customer_type = 'walkin' and public.phone_key(phone) = public.phone_key(p_phone) limit 1;
+  end if;
+  if cid is null then
+    insert into public.clients(name, contact_person, phone, whatsapp, customer_type, status, account_manager_id)
+    values (trim(p_name), trim(p_name), nullif(trim(p_phone), ''), nullif(trim(p_phone), ''), 'walkin', 'active', auth.uid())
+    returning id into cid;
+  end if;
+  return cid;
+end $$;
+grant execute on function public.walkin_customer(text, text) to authenticated;
+
 -- collect the balance of a walk-in invoice later (any team member)
 create or replace function public.walkin_collect(p_invoice uuid, p_amount numeric, p_method text default 'Cash', p_reference text default null)
 returns numeric language plpgsql security definer set search_path = public as $$
