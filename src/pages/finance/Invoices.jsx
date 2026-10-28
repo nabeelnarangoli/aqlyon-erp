@@ -65,7 +65,7 @@ export default function Invoices() {
           {isFin && <Button icon={Plus} onClick={() => setEditing({})}>New invoice</Button>}
         </>} />
       <div className="stats">
-        <Stat label="Outstanding" value={money(outstanding)} sub={`${live.filter((i) => ['sent', 'partial'].includes(i.status)).length} unpaid invoices`} icon={Wallet} tone="amber" onClick={() => setStatus('unpaid')} />
+        <Stat label="Outstanding" value={money(outstanding)} sub={`${live.filter((i) => ['sent', 'partial'].includes(i.status)).length} unpaid invoices${drafts ? ` · drafts not counted until sent` : ''}`} icon={Wallet} tone="amber" onClick={() => setStatus('unpaid')} />
         <Stat label="Overdue" value={money(overdue.reduce((a, i) => a + Number(i.balance), 0))} sub={`${overdue.length} invoices past due`} icon={AlertTriangle} tone={overdue.length ? 'red' : 'green'} onClick={() => setStatus('overdue')} />
         <Stat label="Invoiced this month" value={money(thisMonth)} icon={TrendingUp} tone="teal" />
         <Stat label="Drafts to send" value={drafts} icon={FileText} tone="blue" onClick={() => setStatus('draft')} />

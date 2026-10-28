@@ -150,25 +150,34 @@ function PnL({ from, to }) {
 
 /* ---------------- Receivables aging ---------------- */
 function Receivables() {
-  const { data, loading } = useData(() => q(supabase.from('v_invoice_status').select('*').in('status', ['sent', 'partial'])), [], [])
+  const { data, loading } = useData(() => q(supabase.from('v_invoice_status').select('*').in('status', ['draft', 'sent', 'partial'])), [], [])
   if (loading) return <Loading />
   const buckets = [['Not due', (d) => d <= 0], ['1–30 days', (d) => d > 0 && d <= 30], ['31–60 days', (d) => d > 30 && d <= 60], ['61–90 days', (d) => d > 60 && d <= 90], ['90+ days', (d) => d > 90]]
   const age = (i) => -daysFrom(i.due_date)
+  // drafts are shown on their own — they aren't owed until the invoice is sent to the client
   const byClient = Object.values(data.reduce((a, i) => {
-    const c = (a[i.client_id] ||= { name: i.client_name, total: 0, b: [0, 0, 0, 0, 0] })
-    const idx = buckets.findIndex(([, f]) => f(age(i))); c.b[idx] += Number(i.balance); c.total += Number(i.balance); return a
-  }, {})).sort((x, y) => y.total - x.total)
+    const c = (a[i.client_id] ||= { name: i.client_name, total: 0, draft: 0, nd: 0, b: [0, 0, 0, 0, 0] })
+    const v = Number(i.balance)
+    if (i.status === 'draft') { c.draft += v; c.nd++; return a }
+    const idx = buckets.findIndex(([, f]) => f(age(i))); c.b[idx] += v; c.total += v; return a
+  }, {})).sort((x, y) => (y.total + y.draft) - (x.total + x.draft))
   const tot = buckets.map((_, k) => byClient.reduce((a, c) => a + c.b[k], 0))
+  const draftTot = byClient.reduce((a, c) => a + c.draft, 0), draftN = byClient.reduce((a, c) => a + c.nd, 0)
+  const due = tot.reduce((a, b) => a + b, 0)
   return (
     <>
-      <div className="stats">{buckets.map(([l], k) => <Stat key={l} label={l} value={money(tot[k])} tone={k === 0 ? 'green' : k < 2 ? 'amber' : 'red'} />)}</div>
+      <div className="stats">
+        {buckets.map(([l], k) => <Stat key={l} label={l} value={money(tot[k])} tone={k === 0 ? 'green' : k < 2 ? 'amber' : 'red'} />)}
+        <Stat label="Drafts — not sent yet" value={money(draftTot)} sub={`${draftN} draft invoice${draftN === 1 ? '' : 's'} · counted once sent`} tone="blue" />
+      </div>
       {byClient.length === 0 ? <Empty title="Nothing outstanding 🎉" /> : (
-        <Card title="Aging by client" pad={false} actions={<Button size="sm" variant="ghost" icon={Download} onClick={() => downloadCSV('receivables-aging.csv', byClient.map((c) => ({ client: c.name, ...Object.fromEntries(buckets.map(([l], k) => [l, c.b[k]])), total: c.total })))}>CSV</Button>}>
+        <Card title="Aging by client" pad={false} actions={<Button size="sm" variant="ghost" icon={Download} onClick={() => downloadCSV('receivables-aging.csv', byClient.map((c) => ({ client: c.name, ...Object.fromEntries(buckets.map(([l], k) => [l, c.b[k]])), total_due: c.total, drafts_not_sent: c.draft })))}>CSV</Button>}>
           <div className="table-wrap"><table className="table">
-            <thead><tr><th>Client</th>{buckets.map(([l]) => <th key={l} className="num">{l}</th>)}<th className="num">Total</th></tr></thead>
-            <tbody>{byClient.map((c) => <tr key={c.name}><td className="cell-title">{c.name}</td>{c.b.map((v, k) => <td key={k} className="num" style={{ color: v && k >= 2 ? 'var(--red)' : undefined }}>{v ? money(v) : '—'}</td>)}<td className="num strong">{money(c.total)}</td></tr>)}</tbody>
-            <tfoot><tr><td>Total</td>{tot.map((v, k) => <td key={k} className="num">{money(v)}</td>)}<td className="num">{money(tot.reduce((a, b) => a + b, 0))}</td></tr></tfoot>
+            <thead><tr><th>Client</th>{buckets.map(([l]) => <th key={l} className="num">{l}</th>)}<th className="num">Total due</th><th className="num">Drafts (not sent)</th></tr></thead>
+            <tbody>{byClient.map((c) => <tr key={c.name}><td className="cell-title">{c.name}</td>{c.b.map((v, k) => <td key={k} className="num" style={{ color: v && k >= 2 ? 'var(--red)' : undefined }}>{v ? money(v) : '—'}</td>)}<td className="num strong">{c.total ? money(c.total) : '—'}</td><td className="num faint">{c.draft ? money(c.draft) : '—'}</td></tr>)}</tbody>
+            <tfoot><tr><td>Total</td>{tot.map((v, k) => <td key={k} className="num">{money(v)}</td>)}<td className="num">{money(due)}</td><td className="num">{money(draftTot)}</td></tr></tfoot>
           </table></div>
+          {draftN > 0 && <p className="small faint" style={{ padding: '10px 16px', margin: 0 }}>Draft invoices haven’t been sent to the client, so they aren’t owed yet. Open the invoice and press <b>Mark sent</b> (or send it on WhatsApp) to move it into receivables.</p>}
         </Card>
       )}
     </>
