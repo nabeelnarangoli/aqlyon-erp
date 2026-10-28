@@ -11,6 +11,12 @@ import { Modal, Field, Input, Select, Textarea, ClientSelect, Button, IconBtn, B
 const BILL_LABEL = { monthly: 'Monthly', quarterly: 'Quarterly', yearly: 'Yearly', one_time: 'One time' }
 
 /** kind: 'invoice' | 'quote' */
+const pad2 = (n) => String(n).padStart(2, '0')
+const isoOf = (d) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`
+// first day of the month k months from now / last day of a span of months starting at m0
+const shiftMonth = (k) => { const d = new Date(); return isoOf(new Date(d.getFullYear(), d.getMonth() + k, 1)) }
+const endOf = (m0, months) => { const d = new Date(m0 + 'T00:00:00'); return isoOf(new Date(d.getFullYear(), d.getMonth() + months, 0)) }
+
 export default function DocEditor({ kind, doc = {}, onClose, onSaved }) {
   const { settings } = useAuth()
   const isNew = !doc.id
@@ -47,7 +53,12 @@ export default function DocEditor({ kind, doc = {}, onClose, onSaved }) {
     const p = { ...f, items: clean, discount: Number(f.discount || 0), client_id: f.client_id || null }
     ;['id', 'number', 'subtotal', 'total', 'amount_paid', 'created_at', 'created_by', 'clients', 'balance', 'overdue', 'days_overdue', 'client_name', 'leads'].forEach((k) => delete p[k])
     if (kind === 'invoice') ['lead_id', 'bill_to', 'valid_until', 'full_proposal', 'subject', 'responsibilities', 'exclusions'].forEach((k) => delete p[k])
-    else ['due_date', 'package_id', 'period_month', 'project_id', 'quotation_id'].forEach((k) => delete p[k])
+    else ['due_date', 'package_id', 'period_month', 'period_start', 'period_end', 'project_id', 'quotation_id'].forEach((k) => delete p[k])
+    if (kind === 'invoice') {
+      p.period_start = p.period_start || null; p.period_end = p.period_end || null
+      if (p.period_start && !p.period_end) throw new Error('Invoice period: choose the end date too')
+      if (p.period_start && p.period_end < p.period_start) throw new Error('Invoice period: the end date is before the start date')
+    }
     if (kind === 'quote' && !p.bill_to && lead.data) p.bill_to = [lead.data.company || lead.data.name, lead.data.city, lead.data.phone].filter(Boolean).join('\n')
     const row = isNew ? await q(supabase.from(table).insert(p).select().single()) : await q(supabase.from(table).update(p).eq('id', doc.id).select().single())
     onSaved(row)
@@ -65,7 +76,8 @@ export default function DocEditor({ kind, doc = {}, onClose, onSaved }) {
   const addPackage = (p) => setF((s) => ({
     ...s,
     items: [...s.items.filter((i) => i.description || Number(i.rate)), { description: pkgLine(p), qty: 1, rate: Number(p.fee), package_id: p.id }],
-    ...(kind === 'invoice' && !s.package_id && !billedFor(p) ? { package_id: p.id, period_month: p.billing_type === 'one_time' ? null : month } : {})
+    ...(kind === 'invoice' && !s.package_id && !billedFor(p) ? { package_id: p.id, period_month: p.billing_type === 'one_time' ? null : month } : {}),
+    ...(kind === 'invoice' && !s.period_start && p.billing_type !== 'one_time' ? { period_start: month, period_end: endOf(month, p.billing_type === 'quarterly' ? 3 : p.billing_type === 'yearly' ? 12 : 1) } : {})
   }))
   return (
     <Modal open size="xl" onClose={onClose} title={`${isNew ? 'New' : 'Edit'} ${kind === 'invoice' ? 'invoice' : 'quotation'}${doc.number ? ' · ' + doc.number : ''}`}
@@ -79,6 +91,20 @@ export default function DocEditor({ kind, doc = {}, onClose, onSaved }) {
             ? <Field label="Due date"><Input type="date" value={f.due_date} onChange={set('due_date')} /></Field>
             : <Field label="Valid until"><Input type="date" value={f.valid_until} onChange={set('valid_until')} /></Field>}
           {kind === 'quote' && !f.client_id && <Field label="Bill to (prospect)" span={2} hint={lead.data ? `From lead: ${lead.data.company || lead.data.name}` : 'Name, address, phone'}><Textarea rows={2} value={f.bill_to || (lead.data ? [lead.data.company || lead.data.name, lead.data.city, lead.data.phone].filter(Boolean).join('\n') : '')} onChange={set('bill_to')} /></Field>}
+          {kind === 'invoice' && (
+            <Field label="Invoice period" span={2} hint="The dates this invoice covers — printed on the invoice (optional)">
+              <div className="row gap-xs wrap">
+                <Input type="date" value={f.period_start || ''} onChange={(e) => setF((x) => ({ ...x, period_start: e.target.value, period_end: x.period_end && x.period_end >= e.target.value ? x.period_end : e.target.value ? endOf(e.target.value.slice(0, 8) + '01', 1) : '' }))} style={{ width: 160 }} />
+                <span className="faint">to</span>
+                <Input type="date" value={f.period_end || ''} min={f.period_start || undefined} onChange={set('period_end')} style={{ width: 160 }} />
+                {[['This month', 0], ['Last month', -1], ['Next month', 1]].map(([l, k]) => {
+                  const m0 = shiftMonth(k)
+                  return <button key={l} type="button" className="btn btn-ghost btn-sm" onClick={() => setF((x) => ({ ...x, period_start: m0, period_end: endOf(m0, 1) }))}>{l}</button>
+                })}
+                {f.period_start && <button type="button" className="btn btn-ghost btn-sm" onClick={() => setF((x) => ({ ...x, period_start: '', period_end: '' }))}>Clear</button>}
+              </div>
+            </Field>
+          )}
           <Field label="Status"><Select placeholder={false} options={kind === 'invoice' ? INVOICE_STATUS.filter((s) => ['draft', 'sent', 'cancelled'].includes(s.id) || s.id === f.status) : QUOTE_STATUS} value={f.status} onChange={set('status')} /></Field>
         </div>
 

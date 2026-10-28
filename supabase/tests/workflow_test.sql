@@ -270,4 +270,7 @@ select 'walk-in with salesman + details' t, (walkin_sale(null, 'Salim', '9811112
    null, 'salim@x.in', 'Payyoli', 'Main road', null, 'Ravi (agent)')) ->> 'paid' as paid;
 reset role;
 select 'saved' t, whatsapp, email, city, address, salesman_name from clients where phone='9811112222';
+select 'retainer invoice periods' t, period_month, period_start, period_end from invoices where package_id is not null order by period_start limit 2;
+do $$ begin begin update invoices set period_start = '2026-10-31', period_end = '2026-10-01' where id = (select id from invoices limit 1);
+  raise exception 'FAIL reversed period'; exception when raise_exception then if sqlerrm like 'FAIL%' then raise; end if; raise notice 'ok'; end; end $$;
 select 'ALL TESTS PASSED' as result;

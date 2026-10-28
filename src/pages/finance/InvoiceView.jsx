@@ -58,7 +58,7 @@ export default function InvoiceView({ kind }) {
     const text = kind === 'invoice' && d.status === 'paid'
       ? `Hello ${c?.contact_person || c?.name || ''},\n\nThank you for your payment of ${rawMoney2(d.amount_paid)} for invoice ${d.number} (${(d.items || []).map((i) => i.description).join(', ')}).\n\n— ${st.company_name}${st.phone ? `\n${st.phone}` : ''}`
       : kind === 'invoice'
-      ? `Hello ${c?.contact_person || c?.name || ''},\n\nPlease find invoice ${d.number} from ${st.company_name} for ${rawMoney2(d.total)}${balance < d.total ? ` (balance ${rawMoney2(balance)})` : ''}, due on ${date(d.due_date)}.${st.upi_id ? `\n\nUPI: ${st.upi_id}` : ''}${st.bank_details ? `\n\nBank details:\n${st.bank_details}` : ''}\n\nThank you!`
+      ? `Hello ${c?.contact_person || c?.name || ''},\n\nPlease find invoice ${d.number}${d.period_start ? ` (period ${date(d.period_start)} – ${date(d.period_end || d.period_start)})` : ''} from ${st.company_name} for ${rawMoney2(d.total)}${balance < d.total ? ` (balance ${rawMoney2(balance)})` : ''}, due on ${date(d.due_date)}.${st.upi_id ? `\n\nUPI: ${st.upi_id}` : ''}${st.bank_details ? `\n\nBank details:\n${st.bank_details}` : ''}\n\nThank you!`
       : `Hello ${c?.contact_person || ''},\n\nSharing our quotation ${d.number} for ${rawMoney2(d.total)}, valid until ${date(d.valid_until)}. Happy to discuss any changes.\n\n— ${st.company_name}`
     window.open(waLink(phone, text), '_blank')
     if (d.status === 'draft') setStatus('sent')
@@ -127,7 +127,7 @@ export default function InvoiceView({ kind }) {
             <div className="small" style={{ marginTop: 8, lineHeight: 1.7 }}>
               Date: <b>{date(d.issue_date)}</b><br />
               {kind === 'invoice' ? <>Due: <b>{date(d.due_date)}</b></> : <>Valid until: <b>{date(d.valid_until)}</b></>}
-              {d.period_month && <><br />Period: <b>{new Date(d.period_month).toLocaleDateString('en-IN', { month: 'long', year: 'numeric' })}</b></>}
+              {d.period_start ? <><br />Period: <b>{date(d.period_start)} – {date(d.period_end || d.period_start)}</b></> : d.period_month && <><br />Period: <b>{new Date(d.period_month).toLocaleDateString('en-IN', { month: 'long', year: 'numeric' })}</b></>}
             </div>
           </div>
         </div>

@@ -998,8 +998,9 @@ begin
         or (p.billing_type = 'yearly'    and extract(month from m) = extract(month from p.start_date)))
       and not exists (select 1 from public.invoices i where i.package_id = p.id and i.period_month = m)
   loop
-    insert into public.invoices(client_id, package_id, period_month, issue_date, due_date, items, status, terms)
-    values (pk.client_id, pk.id, m,
+    insert into public.invoices(client_id, package_id, period_month, period_start, period_end, issue_date, due_date, items, status, terms)
+    values (pk.client_id, pk.id, m, m,
+            (m + case pk.billing_type when 'quarterly' then interval '3 months' when 'yearly' then interval '12 months' else interval '1 month' end - interval '1 day')::date,
             greatest(current_date, (m + (coalesce(pk.billing_day,1)-1))::date),
             greatest(current_date, (m + (coalesce(pk.billing_day,1)-1))::date) + 7,
             jsonb_build_array(jsonb_build_object(
@@ -1589,6 +1590,27 @@ do $$ begin
     insert into public.schema_changes(id) values ('money-view-2026-10');
   end if;
 end $$;
+
+-- ---------------------------------------------------------------------
+-- 10i. INVOICE PERIOD (the dates the invoice covers, e.g. 1–31 Oct 2026)
+-- ---------------------------------------------------------------------
+alter table public.invoices add column if not exists period_start date;
+alter table public.invoices add column if not exists period_end date;
+update public.invoices set period_start = period_month, period_end = (period_month + interval '1 month - 1 day')::date
+ where period_month is not null and period_start is null;
+create or replace function public.invoice_period_check() returns trigger language plpgsql as $$
+begin
+  if new.period_start is null and new.period_month is not null then
+    new.period_start := new.period_month; new.period_end := coalesce(new.period_end, (new.period_month + interval '1 month - 1 day')::date);
+  end if;
+  if new.period_start is not null and new.period_end is not null and new.period_end < new.period_start then
+    raise exception 'Invoice period: the end date is before the start date';
+  end if;
+  return new;
+end $$;
+drop trigger if exists trg_invoice_period on public.invoices;
+create trigger trg_invoice_period before insert or update of period_start, period_end, period_month on public.invoices
+  for each row execute function public.invoice_period_check();
 
 -- every money movement in one place (in = client payments, out = supplier payments + expenses)
 create or replace view public.v_money_movements with (security_invoker = true) as

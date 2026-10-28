@@ -547,7 +547,7 @@ function rpc(name, a) {
         if (p.billing_type === 'yearly' && months % 12) continue
         const issue = [iso(new Date()), iso(new Date(new Date(m).getFullYear(), new Date(m).getMonth(), p.billing_day || 1))].sort()[1]
         const label = new Date(m).toLocaleDateString('en-US', { month: 'short', year: 'numeric' })
-        new Query('invoices').insert({ client_id: p.client_id, package_id: p.id, period_month: m, issue_date: issue, due_date: iso(new Date(new Date(issue).getTime() + 7 * 86400000)),
+        new Query('invoices').insert({ client_id: p.client_id, package_id: p.id, period_month: m, period_start: m, period_end: iso(new Date(new Date(m).getFullYear(), new Date(m).getMonth() + (p.billing_type === 'quarterly' ? 3 : p.billing_type === 'yearly' ? 12 : 1), 0)), issue_date: issue, due_date: iso(new Date(new Date(issue).getTime() + 7 * 86400000)),
           items: [{ description: `${p.name} — ${label}`, qty: 1, rate: p.fee }], status: 'draft', terms: settings().invoice_terms }).exec()
         n++
       }

@@ -83,7 +83,7 @@ export default function Invoices() {
             <tr key={i.id} className="click" onClick={() => nav(`/finance/invoices/${i.id}`)}>
               <td className="cell-title nowrap">{i.number}</td>
               <td>{i.client_name}</td>
-              <td className="nowrap">{date(i.issue_date)}</td>
+              <td className="nowrap">{date(i.issue_date)}{i.period_start && <div className="cell-sub">for {date(i.period_start, { day: 'numeric', month: 'short' })} – {date(i.period_end || i.period_start, { day: 'numeric', month: 'short' })}</div>}</td>
               <td className="nowrap">{i.overdue ? <Badge tone="red">{i.days_overdue}d overdue</Badge> : date(i.due_date)}</td>
               <td><StatusBadge list={INVOICE_STATUS} value={i.status} /></td>
               <td className="num">{money(i.total)}</td><td className="num">{money(i.amount_paid)}</td><td className="num strong">{money(i.balance)}</td>
