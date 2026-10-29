@@ -97,7 +97,7 @@ export default function InvoiceView({ kind }) {
       <div className="row between wrap gap-s mb no-print">
         <button className="btn btn-ghost btn-sm" onClick={() => nav(-1)}><ArrowLeft size={14} />Back</button>
         <div className="row gap-s wrap">
-          {d.sale_channel === 'walkin' && <Badge tone="violet">Walk-in sale</Badge>}
+          {d.sale_channel === 'walkin' && <Badge tone="violet">Walk-in sale</Badge>}{d.sale_channel === 'jobs' && <Badge tone="blue">On-demand jobs</Badge>}
           <StatusBadge list={kind === 'invoice' ? INVOICE_STATUS : QUOTE_STATUS} value={d.status} />
           <Button variant="outline" icon={Printer} onClick={() => window.print()}>Print</Button>
           <Button variant="outline" icon={Download} loading={pdfBusy} onClick={() => pdf(`${d.number}${c?.name ? ' ' + c.name : ''}`)}>Download PDF</Button>
@@ -108,7 +108,7 @@ export default function InvoiceView({ kind }) {
           {kind === 'quote' && has('invoices.manage') && d.status !== 'rejected' && <Button icon={FileCheck2} onClick={toInvoice} loading={busy}>Accept → Invoice</Button>}
           {kind === 'quote' && !has('invoices.manage') && canEdit && d.status !== 'accepted' && <Button icon={CheckCircle2} onClick={() => setStatus('accepted', 'Marked accepted — finance can invoice it')}>Accepted</Button>}
           {kind === 'invoice' && isFin && !['paid', 'cancelled'].includes(d.status) && <Button icon={Wallet} onClick={() => setPaying({})}>Record payment</Button>}
-          {kind === 'invoice' && !isFin && d.sale_channel === 'walkin' && ['sent', 'partial'].includes(d.status) && <Button icon={Wallet} onClick={() => setCollecting(true)}>Collect balance</Button>}
+          {kind === 'invoice' && !isFin && ['walkin', 'jobs'].includes(d.sale_channel) && ['sent', 'partial'].includes(d.status) && <Button icon={Wallet} onClick={() => setCollecting(true)}>Collect balance</Button>}
           {canEdit && !['paid', 'cancelled'].includes(d.status) && <Button variant="dark" icon={Pencil} onClick={() => setEditing(true)}>Edit</Button>}
           {kind === 'invoice' && isFin && !['cancelled', 'paid'].includes(d.status) && Number(d.amount_paid) === 0 && <IconBtn icon={Ban} title="Cancel invoice" onClick={() => setStatus('cancelled', 'Invoice cancelled')} />}
           {canEdit && (d.status === 'draft' || d.status === 'cancelled' || kind === 'quote') && <IconBtn icon={Trash2} title="Delete" onClick={del} />}

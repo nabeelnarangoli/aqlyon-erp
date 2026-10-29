@@ -13,6 +13,7 @@ import {
   Button, Badge, StatusBadge, Member, Modal, Field, Input, Select, Textarea, Chips, Tabs, Card, Stat, Loading, ErrorBox, Empty,
   Progress, useAction, useForm, useToast, IconBtn
 } from '../../components/ui'
+import { JobsPanel } from '../Jobs'
 import Interactions from '../../components/Interactions'
 import { SocialReportLink } from '../reports/SocialReports'
 import { ClientModal, monthly } from './Clients'
@@ -35,6 +36,7 @@ export default function ClientDetail() {
     has('tasks.view', 'tasks.work', 'tasks.manage') && { id: 'tasks', label: 'Design tasks' },
     has('projects.view', 'projects.manage') && { id: 'projects', label: 'Campaigns' },
     has('packages.view', 'packages.manage') && { id: 'packages', label: 'Packages' },
+    { id: 'jobs', label: 'On-demand jobs' },
     has('invoices.view', 'invoices.manage') && { id: 'invoices', label: 'Invoices & money flow' },
     has('calendar.manage', 'clients.manage') && { id: 'links', label: 'Client approval links' }
   ].filter(Boolean)
@@ -60,6 +62,7 @@ export default function ClientDetail() {
       {tab === 'tasks' && <ClientTasks clientId={c.id} />}
       {tab === 'projects' && <ClientProjects clientId={c.id} />}
       {tab === 'packages' && <Packages clientId={c.id} />}
+      {tab === 'jobs' && <JobsPanel clientId={c.id} />}
       {tab === 'invoices' && <><ClientInvoices clientId={c.id} /><div className="mt"><MoneyFlow clientId={c.id} /></div></>}
       {tab === 'links' && <ApprovalLinks client={c} />}
       {editing && <ClientModal client={c} onClose={() => setEditing(false)} onSaved={() => { setEditing(false); reload() }} />}

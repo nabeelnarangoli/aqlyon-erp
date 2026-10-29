@@ -38,7 +38,7 @@ Aqlyon ERP is one place for the whole agency: **sales**, **design and content pr
 1. **Lead** — a business shows interest. It is added in \`Leads & Pipeline\` and moved through the stages: New → Contacted → Meeting → Proposal → Negotiation → Won / Lost. See [[leads]].
 2. **Quotation** — you send a price or a full commercial proposal from \`Quotations\`. See [[quotations]].
 3. **Client** — when the lead says yes, press \`Convert to client\`. Their whole conversation history moves with them. See [[convert-lead]].
-4. **Package** — add the monthly retainer on the client's \`Packages\` tab: fee, posts, reels and stories per month. See [[packages]].
+4. **Package** — add the monthly retainer on the client's \`Packages\` tab: fee, posts, reels and stories per month. See [[packages]]. Clients who pay per job instead don't need a package: log each job in [[on-demand-jobs|On-demand jobs]] and bill at month end.
 5. **Work** — posts are planned in the \`Content Calendar\` and designs are made in \`Design Tasks\`. Every design goes through internal review, then client approval. See [[task-lifecycle]] and [[calendar]].
 6. **Invoice** — each month, \`Generate retainer invoices\` creates the invoices from the packages. See [[retainer-invoices]].
 7. **Payment** — record the money when it arrives. The invoice updates to Partly paid or Paid. See [[record-payment]].
@@ -108,11 +108,11 @@ Every user has one **role**. A role is a set of **permissions** that decides whi
 ## Money is private
 Prices, fees, totals and balances are only visible to roles with **See prices & money**. By default that is **Administrator** and **Finance** only. Everyone else sees **—** where an amount would be.
 
-The one exception: anyone making a [[walk-in|walk-in sale]] sees the amount of that sale and what **they** collected, so they can hand over the right change and receipt.
+The exceptions: anyone making a [[walk-in|walk-in sale]] sees the amount of that sale and what **they** collected, so they can hand over the right change and receipt. Amounts on [[on-demand-jobs|On-demand jobs]] are visible to everyone, because the person who does the job enters its price.
 
 ## Everyone can always
 - see their own dashboard,
-- use \`Approvals\`, \`Team Queries\` and \`Walk-in sale\`,
+- use \`Approvals\`, \`Team Queries\`, \`Walk-in sale\` and \`On-demand jobs\`,
 - log their own time in the \`Timesheet\` (if they work on tasks),
 - open this help centre.
 
@@ -584,6 +584,41 @@ If the customer paid an advance, find the sale under **Your walk-in sales · las
 
 ## Your cash today
 **You collected today** shows what you collected, by method — so you can hand over the cash at the end of the day. Finance sees all collections in [[cash-flow|Payments & cash flow]] under *Received by*.`
+  },
+  {
+    id: 'on-demand-jobs', main: true, cat: 'sales', title: 'On-demand jobs (clients without a monthly package)',
+    summary: 'Log single jobs with their amount as you do them, then bill at month end or when the client pays.',
+    routes: ['/jobs', '/clients/'],
+    body: `
+Some clients don't take a monthly package. They ask for one piece of work at a time — a poster today, a banner next week — and pay per job. **On-demand jobs** keeps track of every job and what to charge, so nothing is forgotten at billing time.
+
+**Every team member** can add jobs, including the amount.
+
+## Adding a job
+1. Open \`On-demand jobs\` in the menu and press \`Add job\`. You can also open the client → \`On-demand jobs\` tab → \`Add job\`.
+2. Choose the **customer**. If they're new, press \`+\` next to the list to add them.
+3. Write **what was done** (e.g. "Poster – Friday offer"). Titles you've used before are suggested as you type.
+4. Enter the **date**, **quantity** and **rate** (the price for one). The amount is calculated for you.
+5. Add **notes** if useful (size, platform). They are printed under the line on the invoice.
+6. Optionally link the **design task** it belongs to. People who create tasks can also tick **Also create a design task for this job**, so the designer gets it straight away.
+
+The job now sits under **To bill** until it's invoiced. You can edit it freely until then.
+
+## Billing at month end
+1. \`On-demand jobs\` → \`To bill\` shows every unbilled job from **any date**, grouped by customer, with the total for each.
+2. Untick any job you want to leave for a later bill.
+3. Press \`Bill all\` (or \`Bill 2\`…) on the customer. One invoice is created with **one line per job**, and the **invoice period** is set from the first to the last job date.
+4. Finance can tick **Save as a draft** to check it first, then send it and press \`Mark sent\` (see [[invoices]]). For everyone else the invoice is issued straight away.
+
+## When the client pays on the spot
+Press \`Bill\` on the customer and enter the **amount received now** (\`Full\` fills the whole total), the method and a reference. The invoice and the payment are created together, and the payment is recorded as **collected by you**, just like a [[walk-in|walk-in sale]]. If they paid only part, the rest can be collected later with \`Collect balance\` on the invoice.
+
+## Good to know
+- A billed job is **locked**. To change it, change the invoice. If the invoice is **cancelled** or deleted, its jobs go back to **To bill**.
+- \`All jobs\` lists every job in a period, with its invoice number and status. \`Export\` downloads it.
+- The client's page has an **On-demand jobs** tab with the same view for just that client.
+- Finance can also open this page from \`Invoices\` → \`Bill on-demand jobs\`.
+- Clients with a monthly package can also have on-demand jobs, for extra work that isn't in the package.`
   },
   {
     id: 'quotations', main: true, cat: 'sales', title: 'Quotations and the commercial proposal',

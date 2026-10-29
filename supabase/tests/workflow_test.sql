@@ -273,4 +273,24 @@ select 'saved' t, whatsapp, email, city, address, salesman_name from clients whe
 select 'retainer invoice periods' t, period_month, period_start, period_end from invoices where package_id is not null order by period_start limit 2;
 do $$ begin begin update invoices set period_start = '2026-10-31', period_end = '2026-10-01' where id = (select id from invoices limit 1);
   raise exception 'FAIL reversed period'; exception when raise_exception then if sqlerrm like 'FAIL%' then raise; end if; raise notice 'ok'; end; end $$;
+-- ===== ON-DEMAND JOBS: designer logs jobs with amounts, bills one on the spot; finance bills the rest at month end
+select pg_temp.as_user('00000000-0000-0000-0000-00000000000c');
+insert into client_jobs(client_id, job_date, title, qty, rate, notes) select id, current_date - 3, 'Poster - Friday offer', 1, 600, 'A4 + IG' from clients where customer_type='regular' order by name limit 1;
+insert into client_jobs(client_id, job_date, title, qty, rate) select id, current_date - 1, 'Story set', 3, 150 from clients where customer_type='regular' order by name limit 1;
+insert into client_jobs(client_id, title, rate) select id, 'Logo touch-up', 1000 from clients where customer_type='regular' order by name limit 1;
+select 'designer sees jobs + amounts' t, count(*), sum(amount) from client_jobs;
+select 'bill one now, paid' t, (r->>'status') as status, (r->>'paid')::numeric as paid, (r->>'total')::numeric as total
+  from (select bill_client_jobs(array[(select id from client_jobs where title='Logo touch-up')], 1000, 'UPI') r) x;
+do $$ begin begin perform bill_client_jobs(array[(select id from client_jobs where title='Logo touch-up')]); raise exception 'FAIL double bill';
+  exception when raise_exception then if sqlerrm like 'FAIL%' then raise; end if; raise notice 'ok'; end; end $$;
+do $$ begin begin update client_jobs set rate = 1 where title='Logo touch-up'; if found then raise exception 'FAIL edited billed job'; end if; end; end $$;
+select 'designer can open own job invoice' t, count(*) from invoices where sale_channel='jobs';
+select 'designer draft request becomes sent' t, (bill_client_jobs(array[(select id from client_jobs where title='Story set')], 0, 'Cash', null, true))->>'status';
+reset role;
+select pg_temp.as_user('00000000-0000-0000-0000-00000000000d');
+select 'finance month-end draft' t, r->>'status', (r->>'total')::numeric from (select bill_client_jobs(array(select id from client_jobs where invoice_id is null), 0, 'Cash', null, true) r) x;
+select 'job invoice period+items' t, period_start = current_date - 3, jsonb_array_length(items), items->0->>'details' from invoices where sale_channel='jobs' and status='draft';
+update invoices set status='cancelled' where sale_channel='jobs' and status='draft';
+select 'cancel frees jobs' t, count(*) from client_jobs where invoice_id is null;
+reset role;
 select 'ALL TESTS PASSED' as result;

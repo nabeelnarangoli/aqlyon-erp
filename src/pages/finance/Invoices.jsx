@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { Plus, Repeat, Download, FileText, AlertTriangle, Wallet, TrendingUp } from 'lucide-react'
+import { Plus, Repeat, Download, FileText, AlertTriangle, Wallet, TrendingUp, Briefcase } from 'lucide-react'
 import { supabase, q } from '../../lib/supabase'
 import { useData } from '../../lib/hooks'
 import { useAuth } from '../../lib/auth'
@@ -61,6 +61,7 @@ export default function Invoices() {
       <PageHeader title="Invoices" subtitle="Bill clients, track what’s due and record payments."
         actions={<>
           <Button variant="outline" icon={Download} onClick={() => downloadCSV('invoices.csv', rows.map((i) => ({ number: i.number, client: i.client_name, date: i.issue_date, due: i.due_date, status: i.status, total: i.total, paid: i.amount_paid, balance: i.balance })))}>Export</Button>
+          <Button variant="outline" icon={Briefcase} onClick={() => nav('/jobs')}>Bill on-demand jobs</Button>
           {isFin && <Button variant="dark" icon={Repeat} loading={busy} onClick={generate}>Generate retainer invoices</Button>}
           {isFin && <Button icon={Plus} onClick={() => setEditing({})}>New invoice</Button>}
         </>} />

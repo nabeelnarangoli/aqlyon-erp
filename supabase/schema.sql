@@ -1284,11 +1284,12 @@ returns numeric language plpgsql security definer set search_path = public as $$
 declare inv public.invoices;
 begin
   if not public.is_staff() then raise exception 'Not allowed'; end if;
-  select * into inv from public.invoices where id = p_invoice and sale_channel = 'walkin' and status in ('sent','partial');
+  select * into inv from public.invoices where id = p_invoice and sale_channel in ('walkin','jobs') and status in ('sent','partial');
   if inv.id is null then raise exception 'Invoice not found or already paid'; end if;
   if coalesce(p_amount, 0) <= 0 or p_amount > inv.total - inv.amount_paid + 0.01 then raise exception 'Enter an amount up to the balance (%)', inv.total - inv.amount_paid; end if;
   insert into public.payments(invoice_id, client_id, amount, method, reference, note, collected_by)
-  values (inv.id, inv.client_id, p_amount, coalesce(p_method, 'Cash'), nullif(trim(p_reference), ''), 'Walk-in counter', auth.uid());
+  values (inv.id, inv.client_id, p_amount, coalesce(p_method, 'Cash'), nullif(trim(p_reference), ''),
+          case when inv.sale_channel = 'jobs' then 'On-demand job' else 'Walk-in counter' end, auth.uid());
   return (select total - amount_paid from public.invoices where id = inv.id);
 end $$;
 grant execute on function public.walkin_find(text) to authenticated;
@@ -1612,6 +1613,82 @@ drop trigger if exists trg_invoice_period on public.invoices;
 create trigger trg_invoice_period before insert or update of period_start, period_end, period_month on public.invoices
   for each row execute function public.invoice_period_check();
 
+-- ---------------------------------------------------------------------
+-- 10j. ON-DEMAND JOBS (pay-per-job clients without a monthly package)
+--   Any team member logs a job (e.g. one poster) with its amount against a
+--   client. Unbilled jobs are invoiced at month end (one invoice per client),
+--   or straight away when the client pays on the spot.
+-- ---------------------------------------------------------------------
+create table if not exists public.client_jobs (
+  id             uuid primary key default gen_random_uuid(),
+  client_id      uuid not null references public.clients(id) on delete cascade,
+  job_date       date not null default current_date,
+  title          text not null check (length(trim(title)) > 0),
+  qty            numeric(12,2) not null default 1 check (qty > 0),
+  rate           numeric(12,2) not null default 0 check (rate >= 0),
+  amount         numeric(12,2) generated always as (round(qty * rate, 2)) stored,
+  notes          text,
+  design_task_id uuid references public.design_tasks(id) on delete set null,
+  invoice_id     uuid references public.invoices(id) on delete set null,
+  created_by     uuid default auth.uid() references public.profiles(id) on delete set null,
+  created_at     timestamptz not null default now()
+);
+create index if not exists idx_jobs_client on public.client_jobs(client_id, job_date);
+create index if not exists idx_jobs_unbilled on public.client_jobs(client_id) where invoice_id is null;
+create index if not exists idx_jobs_invoice on public.client_jobs(invoice_id);
+
+-- a cancelled invoice frees its jobs so they can be billed again
+create or replace function public.jobs_release() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  if new.status = 'cancelled' and old.status is distinct from 'cancelled' then
+    update public.client_jobs set invoice_id = null where invoice_id = new.id;
+  end if;
+  return new;
+end $$;
+drop trigger if exists trg_jobs_release on public.invoices;
+create trigger trg_jobs_release after update of status on public.invoices for each row execute function public.jobs_release();
+
+-- bill selected unbilled jobs of ONE client: creates the invoice (period = first–last job date)
+-- and, if money was received on the spot, records the payment as collected by the caller.
+-- Finance may leave it as a draft to review; for everyone else it is issued (sent) straight away.
+drop function if exists public.bill_client_jobs(uuid[], numeric, text, text, boolean, date);
+create or replace function public.bill_client_jobs(p_job_ids uuid[], p_paid numeric default 0, p_method text default 'Cash',
+  p_reference text default null, p_draft boolean default false, p_due_date date default null)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare ids uuid[]; n int; nc int; cid uuid; d1 date; d2 date; its jsonb; inv public.invoices; st public.settings; draft boolean;
+begin
+  if not public.is_staff() then raise exception 'Not allowed'; end if;
+  ids := array(select distinct x from unnest(coalesce(p_job_ids, '{}')) x where x is not null);
+  if cardinality(ids) = 0 then raise exception 'Choose at least one job to bill'; end if;
+  perform 1 from public.client_jobs where id = any(ids) for update;   -- two people can't bill the same job
+  select count(*), count(distinct client_id), (array_agg(client_id))[1], min(job_date), max(job_date)
+    into n, nc, cid, d1, d2
+    from public.client_jobs where id = any(ids) and invoice_id is null;
+  if n <> cardinality(ids) then raise exception 'Some of these jobs are already billed — refresh the page'; end if;
+  if nc > 1 then raise exception 'Bill one customer at a time'; end if;
+  draft := coalesce(p_draft, false) and coalesce(p_paid, 0) = 0 and public.has_perm('invoices.manage');
+  select jsonb_agg(jsonb_build_object(
+           'description', j.title || ' (' || to_char(j.job_date, 'DD Mon YYYY') || ')',
+           'details', nullif(trim(coalesce(j.notes, '')), ''),
+           'qty', j.qty, 'rate', j.rate) order by j.job_date, j.created_at)
+    into its from public.client_jobs j where j.id = any(ids);
+  select * into st from public.settings where id = 1;
+  insert into public.invoices(client_id, issue_date, due_date, period_start, period_end, items, status, sale_channel, notes, terms)
+  values (cid, current_date, coalesce(p_due_date, current_date + 7), d1, d2, its,
+          case when draft then 'draft' else 'sent' end, 'jobs', 'On-demand work', st.invoice_terms)
+  returning * into inv;
+  update public.client_jobs set invoice_id = inv.id where id = any(ids);
+  if coalesce(p_paid, 0) > 0 then
+    if p_paid > inv.total + 0.01 then raise exception 'Amount received (%) is more than the invoice total (%)', p_paid, inv.total; end if;
+    insert into public.payments(invoice_id, client_id, amount, method, reference, note, collected_by)
+    values (inv.id, cid, p_paid, coalesce(p_method, 'Cash'), nullif(trim(p_reference), ''), 'On-demand job', auth.uid());
+  end if;
+  select * into inv from public.invoices where id = inv.id;
+  return jsonb_build_object('invoice_id', inv.id, 'number', inv.number, 'client_id', cid, 'total', inv.total, 'paid', inv.amount_paid, 'status', inv.status);
+end $$;
+grant execute on function public.bill_client_jobs(uuid[], numeric, text, text, boolean, date) to authenticated;
+
 -- every money movement in one place (in = client payments, out = supplier payments + expenses)
 create or replace view public.v_money_movements with (security_invoker = true) as
 select p.id, p.paid_on as on_date, 'in'::text as direction, 'Client payment'::text as kind, p.amount, p.method, p.reference, p.note,
@@ -1731,7 +1808,7 @@ do $$ declare t text; begin
   foreach t in array array['roles','staff_pay','profiles','settings','services','leads','clients','packages','interactions','projects',
     'design_tasks','task_proofs','task_comments','time_logs','queries','query_replies','content_posts','approval_links',
     'quotations','invoices','payments','expenses','notifications','activity_log',
-    'suppliers','supplier_bills','supplier_bill_allocations','supplier_payments','reimbursements','social_kpis'] loop
+    'suppliers','supplier_bills','supplier_bill_allocations','supplier_payments','reimbursements','social_kpis','client_jobs'] loop
     execute format('alter table public.%I enable row level security', t);
   end loop;
 end $$;
@@ -1832,6 +1909,12 @@ create policy p_qr_ins on public.query_replies for insert to authenticated
 -- content calendar & client approval links
 create policy p_kpi_read  on public.social_kpis for select to authenticated using (public.has_perm('calendar.view', 'calendar.manage', 'clients.view', 'clients.manage', 'reports.content'));
 create policy p_kpi_write on public.social_kpis for all to authenticated using (public.has_perm('calendar.manage', 'clients.manage')) with check (public.has_perm('calendar.manage', 'clients.manage'));
+-- on-demand jobs: every team member can see, add and edit unbilled jobs (with amounts); billed jobs are locked
+create policy p_job_read on public.client_jobs for select to authenticated using (public.is_staff());
+create policy p_job_ins  on public.client_jobs for insert to authenticated with check (public.is_staff() and invoice_id is null);
+create policy p_job_upd  on public.client_jobs for update to authenticated using (public.is_staff() and invoice_id is null) with check (invoice_id is null);
+create policy p_job_del  on public.client_jobs for delete to authenticated
+  using (invoice_id is null and (created_by = auth.uid() or public.has_perm('invoices.manage', 'clients.manage')));
 create policy p_post_read  on public.content_posts for select to authenticated using (public.has_perm('calendar.view', 'calendar.manage'));
 create policy p_post_write on public.content_posts for all to authenticated using (public.has_perm('calendar.manage')) with check (public.has_perm('calendar.manage'));
 create policy p_links on public.approval_links for all to authenticated
@@ -1841,7 +1924,7 @@ create policy p_links on public.approval_links for all to authenticated
 create policy p_quote_read on public.quotations for select to authenticated using (public.has_perm('quotations.view', 'quotations.manage'));
 create policy p_quote_rw   on public.quotations for all to authenticated using (public.has_perm('quotations.manage')) with check (public.has_perm('quotations.manage'));
 create policy p_inv_read on public.invoices for select to authenticated using (public.has_perm('invoices.view', 'invoices.manage', 'payments.manage')
-  or (sale_channel = 'walkin' and created_by = auth.uid())
+  or (sale_channel in ('walkin','jobs') and created_by = auth.uid())
   or exists (select 1 from public.payments p where p.invoice_id = invoices.id and p.collected_by = auth.uid()));
 create policy p_inv_rw   on public.invoices for all to authenticated using (public.has_perm('invoices.manage')) with check (public.has_perm('invoices.manage'));
 create policy p_inv_paid on public.invoices for update to authenticated using (public.has_perm('payments.manage'));  -- mark sent when recording a payment

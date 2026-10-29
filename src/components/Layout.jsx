@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import {
   LayoutDashboard, Target, Building2, PhoneCall, Megaphone, Palette, CalendarDays, MessagesSquare,
-  FileText, FileSignature, Wallet, Receipt, BarChart3, Users, Settings, LogOut, Bell, Menu, Clock, CheckCheck, Truck, Store, ShoppingBag, TrendingUp, BadgeCheck, AtSign, X, HelpCircle
+  FileText, FileSignature, Wallet, Receipt, BarChart3, Users, Settings, LogOut, Bell, Menu, Clock, CheckCheck, Truck, Store, ShoppingBag, TrendingUp, BadgeCheck, AtSign, X, HelpCircle, Briefcase
 } from 'lucide-react'
 import { useAuth } from '../lib/auth'
 import { supabase, q, DEMO } from '../lib/supabase'
@@ -18,7 +18,8 @@ const NAV = [
   { group: null, items: [
     { to: '/', label: 'Dashboard', icon: LayoutDashboard, perm: [], end: true },
     { to: '/approvals', label: 'Approvals', icon: BadgeCheck, perm: [], badge: 'approvals', hot: true },
-    { to: '/walkin', label: 'Walk-in sale', icon: ShoppingBag, perm: [] }
+    { to: '/walkin', label: 'Walk-in sale', icon: ShoppingBag, perm: [] },
+    { to: '/jobs', label: 'On-demand jobs', icon: Briefcase, perm: [] }
   ] },
   { group: 'CRM', items: [
     { to: '/leads', label: 'Leads & Pipeline', icon: Target, perm: ['leads.view', 'leads.manage'] },

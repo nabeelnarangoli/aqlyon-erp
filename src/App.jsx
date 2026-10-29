@@ -10,6 +10,7 @@ import SetupNeeded from './pages/SetupNeeded'
 
 const Approvals = lazy(() => import('./pages/Approvals'))
 const Help = lazy(() => import('./pages/Help'))
+const Jobs = lazy(() => import('./pages/Jobs'))
 const Dashboard = lazy(() => import('./pages/Dashboard'))
 const Leads = lazy(() => import('./pages/crm/Leads'))
 const Clients = lazy(() => import('./pages/crm/Clients'))
@@ -93,6 +94,7 @@ function Gate() {
           {/* any team member may open an invoice they billed or collected for (walk-in); the database decides what they can see */}
           <Route path="finance/invoices/:id" element={<InvoiceView kind="invoice" />} />
           <Route path="walkin" element={<WalkIn />} />
+          <Route path="jobs" element={<Jobs />} />
           <Route path="finance/quotations" element={<Guard perm={['quotations.view', 'quotations.manage']}><Quotations /></Guard>} />
           <Route path="finance/quotations/:id" element={<Guard perm={['quotations.view', 'quotations.manage']}><InvoiceView kind="quote" /></Guard>} />
           <Route path="finance/payments" element={<Guard perm={['payments.manage']}><Payments /></Guard>} />

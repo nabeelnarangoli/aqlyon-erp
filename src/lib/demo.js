@@ -4,7 +4,7 @@ import { QUOTE_TERMS, PROPOSAL_INTRO, CLIENT_RESPONSIBILITIES, PROPOSAL_EXCLUSIO
 // database triggers/RPCs from supabase/schema.sql, on sample data kept in localStorage.
 // Only used when the app is built with VITE_DEMO=1.
 
-const KEY = 'aqlyon-erp-demo-v14'
+const KEY = 'aqlyon-erp-demo-v15'
 const SKEY = 'aqlyon-erp-demo-session'
 // same "Remember me" rule as the real app: remembered → localStorage, otherwise this browser session only
 const sessStore = () => { try { return localStorage.getItem('aqlyon-remember') !== '0' ? localStorage : sessionStorage } catch { return sessionStorage } }
@@ -66,6 +66,7 @@ const DEFAULTS = {
   projects: () => ({ type: 'Campaign', budget: 0, ad_spend: 0, status: 'planning', reach: 0, impressions: 0, clicks: 0, leads_generated: 0, conversions: 0, owner_id: uid() }),
   design_tasks: () => ({ task_type: 'Social Post', quantity: 1, priority: 'normal', status: 'todo', created_by: uid(), estimated_hours: 0, revision_count: 0, max_revisions: settings()?.default_max_revisions ?? 3, billable: true, updated_at: nowISO() }),
   task_proofs: () => ({ status: 'pending', uploaded_by: uid() }),
+  client_jobs: () => ({ job_date: iso(new Date()), qty: 1, rate: 0, invoice_id: null, design_task_id: null, created_by: uid() }),
   task_comments: () => ({ kind: 'comment', author_id: uid() }),
   time_logs: () => ({ user_id: uid(), log_date: iso(new Date()), billable: true }),
   queries: () => ({ category: 'General', priority: 'normal', status: 'open', from_user: uid(), updated_at: nowISO() }),
@@ -182,8 +183,14 @@ function kpiFill(r) {
   if (!r.period_end || r.period_end < r.period_start) r.period_end = add(r.period_start, 6)
   r.month = r.period_start.slice(0, 8) + '01'; r.extra ||= {}
 }
+function jobCalc(r) {
+  if (!String(r.title || '').trim()) throw new Error('Write what the job is')
+  if (!(Number(r.qty) > 0) || Number(r.rate) < 0) throw new Error('Check the quantity and rate')
+  r.amount = Math.round(Number(r.qty) * Number(r.rate) * 100) / 100
+}
 function beforeInsert(table, r) {
   const st = settings()
+  if (table === 'client_jobs') { if (r.invoice_id) throw new Error('New jobs cannot be billed directly'); jobCalc(r) }
   if (table === 'social_kpis') kpiFill(r)
   if (table === 'content_posts') postResults(r)
   if (table === 'invoices') { if (!r.number) r.number = `${st.invoice_prefix}-${String(r.issue_date).slice(0, 4)}-${String(seq('invoice')).padStart(4, '0')}`; totals(r) }
@@ -245,6 +252,8 @@ function afterTaskUpdate(old, t) {
 function afterUpdate(table, old, r) {
   if (['leads', 'clients', 'design_tasks', 'queries', 'content_posts'].includes(table)) r.updated_at = nowISO()
   if (table === 'invoices' || table === 'quotations') totals(r)
+  if (table === 'client_jobs') jobCalc(r)
+  if (table === 'invoices' && r.status === 'cancelled' && old.status !== 'cancelled') T('client_jobs').forEach((j) => { if (j.invoice_id === r.id) j.invoice_id = null })
   if (table === 'content_posts' && old.results !== r.results) postResults(r)
   if (table === 'social_kpis') kpiFill(r)
   if (table === 'content_posts' && old.status !== r.status) postReview(r, old)
@@ -275,7 +284,7 @@ function afterUpdate(table, old, r) {
 /* ---------------------------- relations ---------------------------- */
 const FWD = { // parent table -> embedded table -> fk column on parent
   _: { clients: 'client_id', projects: 'project_id', leads: 'lead_id', invoices: 'invoice_id', packages: 'package_id', suppliers: 'supplier_id', supplier_bills: 'bill_id' },
-  content_posts: { design_tasks: 'design_task_id' }, queries: { design_tasks: 'task_id' }, time_logs: { design_tasks: 'task_id' }
+  content_posts: { design_tasks: 'design_task_id' }, client_jobs: { design_tasks: 'design_task_id' }, queries: { design_tasks: 'task_id' }, time_logs: { design_tasks: 'task_id' }
 }
 const REV = { design_tasks: { task_proofs: 'task_id', task_comments: 'task_id' }, queries: { query_replies: 'query_id' },
   supplier_bills: { supplier_bill_allocations: 'bill_id', supplier_payments: 'bill_id' } }
@@ -324,7 +333,7 @@ function visible(table, rows) {
   if (READ[table] && !hasPerm(...READ[table])) {
     // walk-in billing: any team member sees walk-in customers, invoices they billed and money they collected
     if (table === 'clients') return rows.filter((r) => r.customer_type === 'walkin')
-    if (table === 'invoices' || table === 'v_invoice_status') return rows.filter((r) => (r.sale_channel === 'walkin' && r.created_by === me) || T('payments').some((p) => p.invoice_id === r.id && p.collected_by === me))
+    if (table === 'invoices' || table === 'v_invoice_status') return rows.filter((r) => (['walkin', 'jobs'].includes(r.sale_channel) && r.created_by === me) || T('payments').some((p) => p.invoice_id === r.id && p.collected_by === me))
     if (table === 'payments') return rows.filter((r) => r.collected_by === me)
     return []
   }
@@ -422,6 +431,7 @@ class Query {
         for (const r of rows) {
           const old = { ...r }
           guardDesigner(t, old, { ...r, ...this.payload })
+          if (t === 'client_jobs' && old.invoice_id) throw new Error('This job is already billed — change the invoice instead')
           if ((t === 'expenses' || t === 'supplier_payments') && old.reimbursement_id && ((this.payload.amount !== undefined && Number(this.payload.amount) !== Number(old.amount)) || ('paid_by' in this.payload && (this.payload.paid_by || null) !== (old.paid_by || null)))) throw new Error('This expense has already been repaid. Undo the repayment first to change the amount or who paid.')
           Object.assign(r, this.payload)
           afterUpdate(t, old, r)
@@ -436,10 +446,11 @@ class Query {
           if (T('profiles').some((p) => p.role_id === id)) throw new Error('Move the users on this role to another role before deleting it')
         }
         if ((t === 'expenses' || t === 'supplier_payments') && T(t).some((r) => kill.has(r.id) && r.reimbursement_id)) throw new Error('This expense has already been repaid. Undo the repayment first.')
+        if (t === 'client_jobs') for (const id of kill) { const j = T(t).find((r) => r.id === id); if (j.invoice_id) throw new Error('This job is already billed'); if (j.created_by !== uid() && !hasPerm('invoices.manage', 'clients.manage')) throw new Error('Only the person who added this job (or finance) can delete it') }
         db[t] = T(t).filter((r) => !kill.has(r.id))
         if (t === 'reimbursements') [...T('expenses'), ...T('supplier_payments')].forEach((e) => { if (kill.has(e.reimbursement_id)) e.reimbursement_id = null })
         if (t === 'design_tasks') { db.task_proofs = T('task_proofs').filter((p) => !kill.has(p.task_id)); db.task_comments = T('task_comments').filter((p) => !kill.has(p.task_id)) }
-        if (t === 'invoices') db.payments = T('payments').filter((p) => !kill.has(p.invoice_id))
+        if (t === 'invoices') { db.payments = T('payments').filter((p) => !kill.has(p.invoice_id)); T('client_jobs').forEach((j) => { if (kill.has(j.invoice_id)) j.invoice_id = null }) }
         if (t === 'payments') [...new Set(T('invoices').map((i) => i.id))].forEach(syncInvoice)
         if (t === 'supplier_bills') { db.supplier_payments = T('supplier_payments').filter((p) => !kill.has(p.bill_id)); db.supplier_bill_allocations = T('supplier_bill_allocations').filter((a) => !kill.has(a.bill_id)) }
         if (t === 'supplier_payments') T('supplier_bills').forEach((b) => syncBill(b.id))
@@ -487,11 +498,11 @@ function rpc(name, a) {
       const prev = currentUser; currentUser = null   // runs with database rights, like the SQL function
       try {
         if (name === 'walkin_collect') {
-          const inv = T('invoices').find((i) => i.id === a.p_invoice && i.sale_channel === 'walkin' && ['sent', 'partial'].includes(i.status))
+          const inv = T('invoices').find((i) => i.id === a.p_invoice && ['walkin', 'jobs'].includes(i.sale_channel) && ['sent', 'partial'].includes(i.status))
           if (!inv) throw new Error('Invoice not found or already paid')
           const bal = Number(inv.total) - Number(inv.amount_paid)
           if (!(Number(a.p_amount) > 0) || Number(a.p_amount) > bal + 0.01) throw new Error(`Enter an amount up to the balance (${bal})`)
-          new Query('payments').insert({ invoice_id: inv.id, client_id: inv.client_id, amount: Number(a.p_amount), method: a.p_method || 'Cash', reference: a.p_reference || null, note: 'Walk-in counter', created_by: me, collected_by: me }).exec()
+          new Query('payments').insert({ invoice_id: inv.id, client_id: inv.client_id, amount: Number(a.p_amount), method: a.p_method || 'Cash', reference: a.p_reference || null, note: inv.sale_channel === 'jobs' ? 'On-demand job' : 'Walk-in counter', created_by: me, collected_by: me }).exec()
           return { data: Number(inv.total) - Number(inv.amount_paid), error: null }
         }
         const items = a.p_items || []
@@ -515,6 +526,32 @@ function rpc(name, a) {
         }
         const fin = T('invoices').find((i) => i.id === inv.id)
         return { data: { invoice_id: fin.id, number: fin.number, client_id: cid, total: fin.total, paid: fin.amount_paid }, error: null }
+      } finally { currentUser = prev }
+    }
+    if (name === 'bill_client_jobs') {
+      const me = uid(); if (!me) throw new Error('Not allowed')
+      const ids = [...new Set((a.p_job_ids || []).filter(Boolean))]
+      if (!ids.length) throw new Error('Choose at least one job to bill')
+      const jobs = T('client_jobs').filter((j) => ids.includes(j.id) && !j.invoice_id).sort((x, y) => String(x.job_date).localeCompare(y.job_date) || String(x.created_at).localeCompare(y.created_at))
+      if (jobs.length !== ids.length) throw new Error('Some of these jobs are already billed — refresh the page')
+      if (new Set(jobs.map((j) => j.client_id)).size > 1) throw new Error('Bill one customer at a time')
+      const paid = Number(a.p_paid) || 0
+      const draft = !!a.p_draft && paid === 0 && hasPerm('invoices.manage')
+      const fmt = (d) => new Date(d + 'T00:00:00').toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
+      const prev = currentUser; currentUser = null
+      try {
+        const { data: iv } = new Query('invoices').insert({ client_id: jobs[0].client_id, issue_date: iso(new Date()), due_date: a.p_due_date || iso(new Date(Date.now() + 7 * 86400000)),
+          period_start: jobs[0].job_date, period_end: jobs[jobs.length - 1].job_date, status: draft ? 'draft' : 'sent', sale_channel: 'jobs', notes: 'On-demand work', terms: settings().invoice_terms, created_by: me,
+          items: jobs.map((j) => ({ description: `${j.title} (${fmt(j.job_date)})`, details: j.notes || null, qty: Number(j.qty), rate: Number(j.rate) })) }).exec()
+        const inv = Array.isArray(iv) ? iv[0] : iv
+        jobs.forEach((j) => { j.invoice_id = inv.id })
+        if (paid > 0) {
+          if (paid > Number(inv.total) + 0.01) throw new Error('Amount received is more than the invoice total')
+          new Query('payments').insert({ invoice_id: inv.id, client_id: inv.client_id, amount: paid, method: a.p_method || 'Cash', reference: a.p_reference || null, note: 'On-demand job', created_by: me, collected_by: me }).exec()
+        }
+        persist()
+        const fin = T('invoices').find((i) => i.id === inv.id)
+        return { data: { invoice_id: fin.id, number: fin.number, client_id: fin.client_id, total: fin.total, paid: fin.amount_paid, status: fin.status }, error: null }
       } finally { currentUser = prev }
     }
     if (name === 'repay_expenses') {
@@ -818,6 +855,15 @@ function seed() {
   as(d1)
   rpc('walkin_sale', { p_name: 'Rasheed K', p_phone: '9847012345', p_items: [{ description: 'Visiting card design', qty: 1, rate: 800 }, { description: 'Printing 100 nos', qty: 1, rate: 450 }], p_discount: 50, p_paid: 1000, p_method: 'Cash' })
   as(mk)
+  const jaleel = ins('clients', { name: 'C/O Jaleel Mashhoor', contact_person: 'Jaleel Mashhoor', phone: '9847055501', city: 'Koyilandy', industry: 'Politics / Public figure', account_manager_id: mk, onboarded_on: dm(-1, 3) })
+  ins('client_jobs', { client_id: jaleel.id, job_date: dm(-1, 8), title: 'Poster – Nabidinam greeting', rate: 700 })
+  ins('client_jobs', { client_id: jaleel.id, job_date: dm(-1, 19), title: 'Poster – Panchayat meeting', rate: 700, notes: 'A4 + WhatsApp size' })
+  rpc('bill_client_jobs', { p_job_ids: T('client_jobs').map((j) => j.id), p_paid: 1400, p_method: 'UPI' })
+  as(d1)
+  ins('client_jobs', { client_id: jaleel.id, job_date: dm(0, 2), title: 'Poster – Gandhi Jayanti', rate: 700 })
+  ins('client_jobs', { client_id: jaleel.id, job_date: dm(0, 12), title: 'Story set', qty: 3, rate: 200, notes: 'Instagram stories' })
+  as(mk)
+  ins('client_jobs', { client_id: jaleel.id, job_date: dm(0, 20), title: 'Flex banner design', rate: 1200, notes: '10×4 ft, print-ready' })
   ins('quotations', { lead_id: hashim.id, bill_to: 'Hashim Electronics\nKoyilandy\n9447000001', items: [{ description: 'Social Media Management – Starter (12 posts)', qty: 1, rate: 8000 }, { description: 'Meta Ads Management', qty: 1, rate: 6000 }], discount: 1000, status: 'sent' })
 
   // time logs
