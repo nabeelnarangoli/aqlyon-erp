@@ -28,7 +28,7 @@ export function TaskModal({ task = {}, onClose, onSaved }) {
     e.preventDefault()
     run(async () => {
       const p = { ...f }
-      ;['id', 'created_at', 'updated_at', 'code', 'created_by', 'revision_count', 'approved_at', 'delivered_at', 'clients', 'status', 'start_date'].forEach((k) => delete p[k])
+      ;['id', 'created_at', 'updated_at', 'code', 'created_by', 'revision_count', 'approved_at', 'delivered_at', 'clients', 'projects', 'task_proofs', 'task_comments', 'status', 'start_date'].forEach((k) => delete p[k])
       p.client_id = p.client_id || null; p.project_id = p.project_id || null; p.assignee_id = p.assignee_id || null; p.due_date = p.due_date || null
       p.quantity = Number(p.quantity || 1); p.estimated_hours = Number(p.estimated_hours || 0); p.max_revisions = Number(p.max_revisions || 0)
       const row = isNew
