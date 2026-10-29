@@ -16,6 +16,7 @@ import {
 import { JobsPanel } from '../Jobs'
 import Interactions from '../../components/Interactions'
 import { SocialReportLink } from '../reports/SocialReports'
+import { WorkReportLink } from '../reports/WorkReport'
 import { ClientModal, monthly } from './Clients'
 import { TaskModal } from '../tasks/TaskForm'
 import { ProjectModal } from './Projects'
@@ -50,6 +51,7 @@ export default function ClientDetail() {
           <p className="muted">{[c.industry, c.city, c.contact_person, (c.salesman_id || c.salesman_name) && `Brought by ${c.salesman_id ? member(c.salesman_id)?.full_name || 'team member' : c.salesman_name}`].filter(Boolean).join(' · ')}</p>
         </div>
         <div className="page-actions">
+          <WorkReportLink clientId={c.id} />
           {has('calendar.view', 'calendar.manage', 'clients.view', 'clients.manage', 'reports.content') && <SocialReportLink clientId={c.id} />}
           {c.phone && <a className="btn btn-outline" href={`tel:${c.phone}`}><Phone size={15} />Call</a>}
           {(c.whatsapp || c.phone) && <a className="btn btn-outline" target="_blank" rel="noreferrer" href={waLink(c.whatsapp || c.phone)}><MessageCircle size={15} />WhatsApp</a>}

@@ -11,6 +11,7 @@ import SetupNeeded from './pages/SetupNeeded'
 const Approvals = lazy(() => import('./pages/Approvals'))
 const Help = lazy(() => import('./pages/Help'))
 const Jobs = lazy(() => import('./pages/Jobs'))
+const WorkReport = lazy(() => import('./pages/reports/WorkReport'))
 const Dashboard = lazy(() => import('./pages/Dashboard'))
 const Leads = lazy(() => import('./pages/crm/Leads'))
 const Clients = lazy(() => import('./pages/crm/Clients'))
@@ -82,6 +83,7 @@ function Gate() {
           <Route path="leads" element={<Guard perm={['leads.view', 'leads.manage']}><Leads /></Guard>} />
           <Route path="clients" element={<Guard perm={['clients.view', 'clients.manage']}><Clients /></Guard>} />
           <Route path="clients/:id" element={<Guard perm={['clients.view', 'clients.manage']}><ClientDetail /></Guard>} />
+          <Route path="clients/:id/report" element={<Guard perm={['clients.view', 'clients.manage', 'tasks.view', 'tasks.work', 'calendar.view']}><WorkReport /></Guard>} />
           <Route path="followups" element={<Guard perm={['leads.manage', 'clients.manage']}><FollowUps /></Guard>} />
           <Route path="projects" element={<Guard perm={['projects.view', 'projects.manage']}><Projects /></Guard>} />
           <Route path="tasks" element={<Guard perm={['tasks.view', 'tasks.work', 'tasks.manage', 'tasks.review']}><Tasks /></Guard>} />

@@ -849,6 +849,33 @@ Open a client's report:
 Press \`Download PDF\` or \`Print\` for a clean, branded monthly report: deliverables, KPIs with charts, the content log and the best-performing posts.`
   },
   {
+    id: 'work-report', main: true, cat: 'reports', title: 'Client work report (how many posters, posts, jobs…)',
+    summary: 'For any customer and any period: how many designs, posts and on-demand jobs were done, by type.',
+    routes: ['/clients/'],
+    body: `
+Use the work report when a client (or you) asks "how much work did you do for us?" — for a month, a quarter or any dates you choose.
+
+## Opening it
+1. Open the client and press \`Work report\` at the top of their page.
+2. Pick the **period** with the date button: This month, Last month, Last 3 months… or a **custom From–To**.
+3. To switch to another customer, choose them in the customer box at the top.
+
+## What it counts
+- **Designs** — design tasks, counted **per piece**: a task "Social Post ×3" counts as 3. They're grouped by type (Social Post, Poster, Story, Reel, Flyer, Logo…). A finished task is dated on the day it was **approved or delivered**.
+- **Posts** — posts in the [[calendar|content calendar]], grouped by type (Poster, Carousel, Reel, Story…), dated by their **publish date**.
+- **On-demand jobs** — every [[on-demand-jobs|on-demand job]] in the period, with quantity and amount.
+
+## Completed work vs everything
+- **Completed work** (the default) counts only finished items: designs **approved or delivered**, posts **approved, scheduled or posted**.
+- **Everything in period** also includes work still in progress, with separate *Finished* and *In progress* columns. Unfinished designs are dated by their due date.
+
+## Sharing it
+- \`Show item list\` adds a dated list of every item under the summary. Untick it for a one-page summary.
+- \`Download PDF\` or \`Print\` gives a clean report with your logo to send to the client. \`CSV\` downloads the item list as a spreadsheet.
+
+> A post that was made from a design task appears in both **Designs** and **Posts**, because it's both a design delivered and a post published. Look at one section at a time when you quote totals to a client.`
+  },
+  {
     id: 'business-reports', main: true, cat: 'reports', title: 'Business reports',
     summary: 'Profit & loss, receivables, client profitability, sales, team productivity and content delivery.',
     perm: ['reports.finance', 'reports.clients', 'reports.sales', 'reports.team', 'reports.content', 'tasks.work'], routes: ['/reports'],
