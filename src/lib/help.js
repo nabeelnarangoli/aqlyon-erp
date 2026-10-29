@@ -605,7 +605,7 @@ Some clients don't take a monthly package. They ask for one piece of work at a t
 The job now sits under **To bill** until it's invoiced. You can edit it freely until then.
 
 ## Billing at month end
-1. \`On-demand jobs\` → \`To bill\` shows every unbilled job from **any date**, grouped by customer, with the total for each.
+1. \`On-demand jobs\` → \`To bill\` shows every unbilled job from **any date**, grouped by customer, with the total for each. To bill only one month, pick the period with the date button at the top (e.g. *Last month*) and tick **Only jobs dated …**.
 2. Untick any job you want to leave for a later bill.
 3. Press \`Bill all\` (or \`Bill 2\`…) on the customer. One invoice is created with **one line per job**, and the **invoice period** is set from the first to the last job date.
 4. Finance can tick **Save as a draft** to check it first, then send it and press \`Mark sent\` (see [[invoices]]). For everyone else the invoice is issued straight away.
@@ -615,7 +615,8 @@ Press \`Bill\` on the customer and enter the **amount received now** (\`Full\` f
 
 ## Good to know
 - A billed job is **locked**. To change it, change the invoice. If the invoice is **cancelled** or deleted, its jobs go back to **To bill**.
-- \`All jobs\` lists every job in a period, with its invoice number and status. \`Export\` downloads it.
+- The **date button** at the top sets the period for the *Jobs done* and *Billed* cards and the \`All jobs\` tab. *Waiting to be billed* always counts unbilled jobs from any date.
+- \`All jobs\` lists every job in the period, with its invoice number and status. \`Export\` downloads it.
 - The client's page has an **On-demand jobs** tab with the same view for just that client.
 - Finance can also open this page from \`Invoices\` → \`Bill on-demand jobs\`.
 - Clients with a monthly package can also have on-demand jobs, for extra work that isn't in the package.`

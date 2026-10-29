@@ -6,7 +6,7 @@ import { useAuth } from '../lib/auth'
 import { useData } from '../lib/hooks'
 import { PAYMENT_METHODS, INVOICE_STATUS, TASK_TYPES } from '../lib/constants'
 import { rawMoney, rawMoney2, date, todayISO, addDays, downloadCSV } from '../lib/format'
-import DateRange, { presetRange } from '../components/DateRange'
+import DateRange, { presetRange, rangePresets } from '../components/DateRange'
 import {
   PageHeader, Button, Card, Field, Input, Select, Textarea, ClientSelect, Badge, StatusBadge, IconBtn, Empty, Loading, Stat, Modal, Tabs, Member,
   useAction, useForm, useToast
@@ -44,6 +44,7 @@ export function JobsPanel({ clientId }) {
   const [editing, setEditing] = useState(null)
   const [billing, setBilling] = useState(null)
   const [skip, setSkip] = useState(() => new Set())   // jobs un-ticked in the "to bill" view
+  const [onlyPeriod, setOnlyPeriod] = useState(false)  // "to bill": only jobs dated in the chosen period
   const canManage = has('invoices.manage', 'clients.manage')
   const seeTasks = has('tasks.view', 'tasks.work', 'tasks.manage')
 
@@ -60,9 +61,13 @@ export function JobsPanel({ clientId }) {
   }, [client, from, to], [])
   const reload = () => { unbilled.reload(); all.reload() }
 
-  const groups = useMemo(() => Object.values(unbilled.data.reduce((a, j) => {
+  const toBill = onlyPeriod ? unbilled.data.filter((j) => j.job_date >= from && j.job_date <= to) : unbilled.data
+  const pr = rangePresets().find((x) => x.from === from && x.to === to)
+  const fmtD = (d) => new Date(d + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })
+  const periodLabel = pr ? pr.label.replace(/ \(.*\)$/, '').toLowerCase() : `${fmtD(from)} – ${fmtD(to)}`
+  const groups = useMemo(() => Object.values(toBill.reduce((a, j) => {
     (a[j.client_id] ||= { id: j.client_id, name: j.clients?.name || 'Customer', walkin: j.clients?.customer_type === 'walkin', jobs: [] }).jobs.push(j); return a
-  }, {})).sort((x, y) => sum(y.jobs) - sum(x.jobs)), [unbilled.data])
+  }, {})).sort((x, y) => sum(y.jobs) - sum(x.jobs)), [toBill])
   const billedInPeriod = all.data.filter((j) => j.invoice_id)
 
   const del = async (j) => {
@@ -77,22 +82,28 @@ export function JobsPanel({ clientId }) {
 
   return (
     <>
+      <div className="filters">
+        {!clientId && <ClientSelect value={client} onChange={(v) => setClient(v || '')} placeholder="All customers" includeInactive />}
+        <DateRange from={from} to={to} onChange={(a, b) => setRange([a, b])} />
+        <div className="grow" />
+        <Button variant="outline" size="sm" icon={Download} onClick={exportCSV}>Export</Button>
+        {clientId && <Button size="sm" icon={Plus} onClick={() => setEditing({ client_id: clientId })}>Add job</Button>}
+      </div>
       <div className="stats">
-        <Stat label="Waiting to be billed" value={rawMoney(sum(unbilled.data))} sub={`${unbilled.data.length} job${unbilled.data.length === 1 ? '' : 's'}${clientId ? '' : ` · ${groups.length} customer${groups.length === 1 ? '' : 's'}`} · any date`}
-          icon={CalendarClock} tone={unbilled.data.length ? 'amber' : 'green'} onClick={() => setTab('bill')} />
-        <Stat label="Jobs done in period" value={rawMoney(sum(all.data))} sub={`${all.data.length} job${all.data.length === 1 ? '' : 's'}`} icon={Briefcase} tone="blue" onClick={() => setTab('all')} />
-        <Stat label="Billed in period" value={rawMoney(sum(billedInPeriod))} sub={`${billedInPeriod.length} job${billedInPeriod.length === 1 ? '' : 's'} invoiced`} icon={Receipt} tone="teal" onClick={() => setTab('all')} />
+        <Stat label="Waiting to be billed" value={rawMoney(sum(unbilled.data))} sub={`${unbilled.data.length} job${unbilled.data.length === 1 ? '' : 's'}${clientId ? '' : ` · ${new Set(unbilled.data.map((j) => j.client_id)).size} customer(s)`} · from any date`}
+          icon={CalendarClock} tone={unbilled.data.length ? 'amber' : 'green'} onClick={() => { setOnlyPeriod(false); setTab('bill') }} />
+        <Stat label={`Jobs done · ${periodLabel}`} value={rawMoney(sum(all.data))} sub={`${all.data.length} job${all.data.length === 1 ? '' : 's'} dated in this period`} icon={Briefcase} tone="blue" onClick={() => setTab('all')} />
+        <Stat label={`Billed · ${periodLabel}`} value={rawMoney(sum(billedInPeriod))} sub={`${billedInPeriod.length} of those job${billedInPeriod.length === 1 ? '' : 's'} invoiced`} icon={Receipt} tone="teal" onClick={() => setTab('all')} />
       </div>
       <div className="row between wrap gap-s">
-        <Tabs value={tab} onChange={setTab} tabs={[{ id: 'bill', label: 'To bill', count: unbilled.data.length }, { id: 'all', label: 'All jobs' }]} />
-        {clientId && <Button size="sm" icon={Plus} onClick={() => setEditing({ client_id: clientId })}>Add job</Button>}
+        <Tabs value={tab} onChange={setTab} tabs={[{ id: 'bill', label: 'To bill', count: toBill.length }, { id: 'all', label: `All jobs · ${periodLabel}`, count: all.data.length }]} />
+        {tab === 'bill' && <label className="check small"><input type="checkbox" checked={onlyPeriod} onChange={(e) => { setOnlyPeriod(e.target.checked); setSkip(new Set()) }} />Only jobs dated {periodLabel}</label>}
       </div>
 
       {tab === 'bill' ? (
         <>
-          {!clientId && <div className="filters"><ClientSelect value={client} onChange={(v) => setClient(v || '')} placeholder="All customers" includeInactive /></div>}
           {unbilled.loading ? <Loading /> : !groups.length ? (
-            <Card><Empty icon={CheckCircle2} title="Nothing waiting to be billed">Jobs you add appear here until they are invoiced.</Empty></Card>
+            <Card><Empty icon={CheckCircle2} title={onlyPeriod ? `Nothing to bill dated ${periodLabel}` : 'Nothing waiting to be billed'}>{onlyPeriod ? 'Untick “Only jobs dated …” to see unbilled jobs from any date.' : 'Jobs you add appear here until they are invoiced.'}</Empty></Card>
           ) : groups.map((g) => {
             const picked = g.jobs.filter((j) => !skip.has(j.id))
             return (
@@ -122,12 +133,6 @@ export function JobsPanel({ clientId }) {
         </>
       ) : (
         <>
-          <div className="filters">
-            {!clientId && <ClientSelect value={client} onChange={(v) => setClient(v || '')} placeholder="All customers" includeInactive />}
-            <DateRange from={from} to={to} onChange={(a, b) => setRange([a, b])} />
-            <div className="grow" />
-            <Button variant="outline" size="sm" icon={Download} onClick={exportCSV}>Export</Button>
-          </div>
           <Card pad={false}>
             {all.loading ? <Loading /> : !all.data.length ? <Empty icon={Briefcase} title="No jobs in this period" /> : (
               <div className="table-wrap"><table className="table">
