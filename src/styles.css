@@ -493,3 +493,50 @@ body.pdf-capture .doc { box-shadow: none; border: 0; }
 .select-list button.empty { color: var(--text-3); }
 .select-group { font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--text-3); padding: 8px 10px 3px; }
 .select-none { padding: 10px; font-size: 13px; color: var(--text-3); }
+
+/* ---------- Help & guide ---------- */
+.help-btn { gap: 6px; color: var(--text-2); }
+.help-btn:hover { color: var(--green-d); }
+.help-layout { display: grid; grid-template-columns: 290px 1fr; gap: 20px; align-items: start; }
+.help-side { position: sticky; top: 12px; max-height: calc(100vh - 110px); overflow: auto; padding-right: 4px; }
+.help-search { width: 100%; max-width: none; }
+.help-nav { margin-top: 12px; }
+.help-nav a { display: block; padding: 6px 10px; border-radius: 8px; font-size: 13.5px; color: var(--text-2); line-height: 1.35; }
+.help-nav a:hover { background: var(--surface-2); color: var(--text); }
+.help-nav a.on { background: var(--green-50); color: var(--green-d); font-weight: 600; }
+.help-nav-group { display: flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; color: var(--text-3); margin: 16px 10px 6px; }
+.help-nav-group.mt { margin: 18px 2px 8px; }
+.help-cats { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; }
+.help-cat-link { display: block; padding: 5px 0; font-size: 14px; border-top: 1px solid var(--line-2); }
+.help-cat-link:first-of-type { border-top: 0; }
+.help-row { display: flex; align-items: center; gap: 12px; width: 100%; text-align: left; padding: 12px 14px; background: none; border: 0; border-bottom: 1px solid var(--line-2); cursor: pointer; color: inherit; font: inherit; }
+.help-row:hover, .help-row.on { background: var(--surface-2); }
+.help-article { max-width: 760px; }
+.help-crumb { text-transform: uppercase; letter-spacing: .07em; font-weight: 700; }
+.help-title { margin: 4px 0 4px; font-size: 22px; }
+.help-summary { margin: 0 0 18px; font-size: 15px; }
+.help-body { font-size: 14.5px; line-height: 1.65; color: var(--text); }
+.help-body h3 { font-size: 16.5px; margin: 24px 0 8px; }
+.help-body h4 { font-size: 14.5px; margin: 18px 0 6px; }
+.help-body p { margin: 0 0 12px; }
+.help-body ul, .help-body ol { margin: 0 0 14px; padding-left: 22px; }
+.help-body li { margin: 4px 0; }
+.help-body li > ul { margin: 4px 0 0; }
+.help-ui { display: inline-block; padding: 0 6px; border-radius: 6px; background: var(--surface-2); border: 1px solid var(--line); font-size: .9em; font-weight: 600; white-space: nowrap; line-height: 1.6; }
+.help-link { color: var(--green-d); font-weight: 600; cursor: pointer; text-decoration: underline; text-decoration-color: var(--green-100); text-underline-offset: 2px; }
+.help-callout { display: flex; gap: 10px; padding: 10px 14px; border-radius: 10px; margin: 0 0 14px; font-size: 14px; }
+.help-callout svg { flex: none; margin-top: 3px; }
+.help-callout.tip { background: var(--green-50); color: var(--green-d); }
+.help-callout.tip > div { color: var(--text); }
+.help-callout.warn { background: #fff7e6; color: #b26a00; }
+.help-callout.warn > div { color: var(--text); }
+.help-related { margin-top: 22px; padding-top: 14px; border-top: 1px solid var(--line-2); display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+.help-pager { display: flex; justify-content: space-between; gap: 10px; margin-top: 22px; flex-wrap: wrap; }
+.help-pager .btn { max-width: 48%; white-space: normal; text-align: left; }
+@media (max-width: 900px) {
+  .help-layout { grid-template-columns: 1fr; }
+  .help-side { position: static; max-height: none; }
+  .help-nav { display: none; }
+  .help-btn span { display: none; }
+}
+@media print { .help-side, .help-pager { display: none; } .help-layout { display: block; } }

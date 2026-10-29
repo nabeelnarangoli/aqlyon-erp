@@ -3,13 +3,14 @@ import { createPortal } from 'react-dom'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import {
   LayoutDashboard, Target, Building2, PhoneCall, Megaphone, Palette, CalendarDays, MessagesSquare,
-  FileText, FileSignature, Wallet, Receipt, BarChart3, Users, Settings, LogOut, Bell, Menu, Clock, CheckCheck, Truck, Store, ShoppingBag, TrendingUp, BadgeCheck, AtSign, X
+  FileText, FileSignature, Wallet, Receipt, BarChart3, Users, Settings, LogOut, Bell, Menu, Clock, CheckCheck, Truck, Store, ShoppingBag, TrendingUp, BadgeCheck, AtSign, X, HelpCircle
 } from 'lucide-react'
 import { useAuth } from '../lib/auth'
 import { supabase, q, DEMO } from '../lib/supabase'
 import { resetDemo } from '../lib/demo'
 import { useData, useRealtime, useDebounced } from '../lib/hooks'
 import { REPORT_PERMS } from '../lib/permissions'
+import { HelpDrawer } from '../pages/Help'
 import { ago } from '../lib/format'
 import { Avatar, IconBtn, SearchInput, Badge, cx } from './ui'
 
@@ -45,15 +46,22 @@ const NAV = [
   ] },
   { group: 'Admin', items: [
     { to: '/team', label: 'Team & Access', icon: Users, perm: ['team.manage'] },
-    { to: '/settings', label: 'Settings', icon: Settings, perm: ['settings.manage'] }
+    { to: '/settings', label: 'Settings', icon: Settings, perm: ['settings.manage'] },
+    { to: '/help', label: 'Help & guide', icon: HelpCircle, perm: [] }
   ] }
 ]
 
 export default function Layout() {
   const { profile, has, role, signOut, user } = useAuth()
   const [open, setOpen] = useState(false)
+  const [help, setHelp] = useState(false)
   const loc = useLocation()
   useEffect(() => setOpen(false), [loc.pathname])
+  // "?" opens the guide for this page (unless typing in a field)
+  useEffect(() => {
+    const k = (e) => { if (e.key === '?' && !/INPUT|TEXTAREA|SELECT/.test(e.target.tagName) && !e.target.isContentEditable) { e.preventDefault(); setHelp(true) } }
+    document.addEventListener('keydown', k); return () => document.removeEventListener('keydown', k)
+  }, [])
 
   const counts = useData(async () => {
     const uid = user.id
@@ -108,8 +116,10 @@ export default function Layout() {
           <GlobalSearch />
           <div className="grow" />
           {DEMO && <DemoBar />}
+          <button type="button" className="btn btn-ghost btn-sm help-btn" title="Help for this page (press ?)" onClick={() => setHelp(true)}><HelpCircle size={17} /><span>Help</span></button>
           <Notifications />
         </header>
+        <HelpDrawer open={help} onClose={() => setHelp(false)} path={loc.pathname} />
         <main className="content"><Outlet /></main>
       </div>
     </div>
