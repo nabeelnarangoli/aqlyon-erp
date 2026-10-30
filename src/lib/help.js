@@ -425,11 +425,14 @@ The task page shows the **brief**, the **copy text** (use it exactly), **referen
 
 ## 3. Upload a proof
 In **Proofs & versions**:
-1. Choose the file (JPG, PNG, PDF, MP4 — up to 50 MB), **or** paste a Drive / Canva / Figma link.
-2. Add a **note for the reviewer** — what changed in this version.
-3. Upload. The task moves to **Internal review** and the reviewers are notified.
+1. Choose the file (JPG, PNG, PDF, MP4 — up to 50 MB each), **or** paste a Drive / Canva / Figma link.
+2. **Several designs in one task** (e.g. 5 badges + 10 speaker backgrounds): select **all the files at once** — hold \`Ctrl\` / \`Cmd\` or drag the whole set onto the box. You can add more by clicking or dropping again, and remove one with its ✕. Up to 40 files per version.
+3. Add a **note for the reviewer** — what changed in this version.
+4. Press \`Submit v1 for review\` (it shows how many files). The task moves to **Internal review** and the reviewers are notified.
 
-Each upload becomes a new version (v1, v2, v3…), so the history is kept.
+Each upload becomes a new version (v1, v2, v3…) containing all its files, so the history is kept. Reviewers see a **"16 files"** badge, a strip of thumbnails and \`View all\`, which opens a full-screen viewer — use ‹ › or the arrow keys to go through every design. The client sees all designs of the version on their approval link and can ask for changes by number.
+
+When changes are requested, upload the **full set again** as the next version (including the designs that didn't change), so each version is complete.
 
 ### Image optimisation
 Images are converted to high-quality WebP at **full resolution** before upload, which saves a lot of storage without visible quality loss. You'll see the size saving before uploading. For print files where the exact original is needed, tick \`Keep original file (print-ready)\`.

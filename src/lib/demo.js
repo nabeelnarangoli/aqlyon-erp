@@ -65,7 +65,7 @@ const DEFAULTS = {
   interactions: () => ({ type: 'call', direction: 'outgoing', done: false, occurred_at: nowISO(), created_by: uid() }),
   projects: () => ({ type: 'Campaign', budget: 0, ad_spend: 0, status: 'planning', reach: 0, impressions: 0, clicks: 0, leads_generated: 0, conversions: 0, owner_id: uid() }),
   design_tasks: () => ({ task_type: 'Social Post', quantity: 1, priority: 'normal', status: 'todo', created_by: uid(), estimated_hours: 0, revision_count: 0, max_revisions: settings()?.default_max_revisions ?? 3, billable: true, updated_at: nowISO() }),
-  task_proofs: () => ({ status: 'pending', uploaded_by: uid() }),
+  task_proofs: () => ({ status: 'pending', uploaded_by: uid(), files: [] }),
   client_jobs: () => ({ job_date: iso(new Date()), qty: 1, rate: 0, invoice_id: null, design_task_id: null, created_by: uid() }),
   task_comments: () => ({ kind: 'comment', author_id: uid() }),
   time_logs: () => ({ user_id: uid(), log_date: iso(new Date()), billable: true }),
@@ -673,7 +673,11 @@ export async function demoApi(name, body) {
   if (name === 'admin-users' && body.action === 'set_password') { db._pw[body.user_id] = body.password; persist(); return { ok: true } }
   return { ok: true }
 }
-export const demoFileUrls = (ids) => Object.fromEntries(ids.map((id) => [id, files[T('task_proofs').find((p) => p.id === id)?.file_path]]).filter(([, u]) => u))
+export const demoFileUrls = (ids) => Object.fromEntries(ids.map((id) => {
+  const p = T('task_proofs').find((x) => x.id === id)
+  const list = p?.files?.length ? p.files : p?.file_path ? [{ path: p.file_path, name: p.file_name, type: p.file_type }] : []
+  return [id, list.map((f) => ({ url: files[f.path], name: f.name, type: f.type })).filter((f) => f.url)]
+}).filter(([, l]) => l.length))
 
 // restore a signed-in demo user for this tab
 ;(function restore() {

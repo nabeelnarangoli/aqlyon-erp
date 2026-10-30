@@ -39,8 +39,13 @@ export const appLink = (path) => (DEMO ? `${window.location.href.split('#')[0]}#
 export async function portalFileUrls(token, ids) {
   if (DEMO) return demoFileUrls(ids)
   const r = await fetch('/api/portal-file', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token, proof_ids: ids }) })
-  return (await r.json()).urls || {}
+  const j = await r.json()
+  // { proofId: [{ url, name, type }] } — every file of the version
+  return j.files || Object.fromEntries(Object.entries(j.urls || {}).map(([id, url]) => [id, [{ url }]]))
 }
+
+/** the files of a proof version: [{ path, name, type }] (older proofs only have file_path) */
+export const proofFiles = (p) => (Array.isArray(p?.files) && p.files.length ? p.files : p?.file_path ? [{ path: p.file_path, name: p.file_name, type: p.file_type }] : [])
 
 /** Throw on Supabase error, return data. */
 export async function q(promise) {

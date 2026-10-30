@@ -374,6 +374,11 @@ create table if not exists public.task_proofs (
   uploaded_by   uuid references public.profiles(id) on delete set null default auth.uid(),
   created_at    timestamptz not null default now()
 );
+-- a version can hold several files (e.g. 16 posters of one task): [{path, name, type, size}];
+-- file_path / file_name / file_type always mirror the first file
+alter table public.task_proofs add column if not exists files jsonb not null default '[]';
+update public.task_proofs set files = jsonb_build_array(jsonb_build_object('path', file_path, 'name', file_name, 'type', file_type))
+ where file_path is not null and files = '[]'::jsonb;
 
 create table if not exists public.task_comments (
   id          uuid primary key default gen_random_uuid(),
@@ -1731,6 +1736,7 @@ begin
     'proofs', coalesce((select jsonb_agg(x order by x->>'created_at' desc) from (
               select jsonb_build_object('id', pr.id, 'task_code', t.code, 'task_title', t.title, 'task_type', t.task_type,
                      'version', pr.version, 'file_path', pr.file_path, 'file_type', pr.file_type, 'external_link', pr.external_link,
+                     'files', (select coalesce(jsonb_agg(jsonb_build_object('name', f->>'name', 'type', f->>'type')), '[]') from jsonb_array_elements(pr.files) f),
                      'note', pr.note, 'client_decision', pr.client_decision, 'client_note', pr.client_note, 'created_at', pr.created_at) x
               from public.task_proofs pr join public.design_tasks t on t.id = pr.task_id
               where t.client_id = c.id and pr.status = 'approved'

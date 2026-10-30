@@ -2,9 +2,9 @@ import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams, Link } from 'react-router-dom'
 import {
   ArrowLeft, Pencil, Play, UploadCloud, CheckCircle2, XCircle, Send, Clock, Trash2, Link2, FileText, Film, ExternalLink, Truck,
-  HelpCircle, ThumbsUp, ThumbsDown, Ban, Copy, Plus
+  HelpCircle, ThumbsUp, ThumbsDown, Ban, Copy, Plus, X, Images
 } from 'lucide-react'
-import { supabase, q, uploadFile, signedUrl } from '../../lib/supabase'
+import { supabase, q, uploadFile, signedUrl, proofFiles } from '../../lib/supabase'
 import { optimizeImage, fmtBytes } from '../../lib/imageOptimize'
 import { useData, useRealtime } from '../../lib/hooks'
 import { useAuth } from '../../lib/auth'
@@ -15,6 +15,7 @@ import {
   MemberSelect, useAction, useForm, useToast, cx
 } from '../../components/ui'
 import { TaskModal } from './TaskForm'
+import Gallery from '../../components/Gallery'
 
 export default function TaskDetail() {
   const { id } = useParams()
@@ -29,7 +30,11 @@ export default function TaskDetail() {
   const task = useData(() => q(supabase.from('design_tasks').select('*, clients(*), projects(name)').eq('id', id).single()), [id])
   const proofs = useData(async () => {
     const rows = await q(supabase.from('task_proofs').select('*').eq('task_id', id).order('version', { ascending: false }))
-    return Promise.all(rows.map(async (p) => ({ ...p, url: p.file_path ? await signedUrl('proofs', p.file_path) : null })))
+    // sign every file of every version (a version can hold many posters)
+    return Promise.all(rows.map(async (p) => {
+      const items = await Promise.all(proofFiles(p).map(async (f) => ({ ...f, url: f.path ? await signedUrl('proofs', f.path).catch(() => null) : null })))
+      return { ...p, items, url: items[0]?.url || null }
+    }))
   }, [id], [])
   const posts = useData(() => q(supabase.from('content_posts').select('id,title,publish_date,status').eq('design_task_id', id)), [id], [])
   useRealtime('design_tasks', `id=eq.${id}`, () => task.reload())
@@ -175,37 +180,73 @@ function FinalLink({ t, canEdit, onSaved }) {
 }
 
 /* ------------------------------ Proofs ------------------------------ */
+const MAX_FILES = 40
 function ProofsSection({ t, proofs, canUpload, canReview, onReview, onChanged }) {
   const { user, isAdmin, member } = useAuth()
   const { confirm } = useToast()
-  const [file, setFileRaw] = useState(null)
-  const [opt, setOpt] = useState(null)        // optimised copy of an image
+  const [picked, setPicked] = useState([])     // [{ key, file, opt }] — opt: 'working' | optimizeImage() result | null
   const [original, setOriginal] = useState(false)
   const [link, setLink] = useState('')
   const [note, setNote] = useState('')
   const [over, setOver] = useState(false)
-  const [zoom, setZoom] = useState(null)
+  const [zoom, setZoom] = useState(null)       // { items, i }
+  const [progress, setProgress] = useState(null)
   const [busy, run] = useAction()
   const input = useRef()
 
-  const pick = useRef(0)
-  const setFile = async (f) => {
-    const n = ++pick.current
-    setFileRaw(f || null); setOpt(f && f.type.startsWith('image/') ? 'working' : null)
-    if (f && f.type.startsWith('image/')) { const r = await optimizeImage(f, 'design'); if (n === pick.current) setOpt(r) }
+  const addFiles = (list) => {
+    const incoming = [...(list || [])].filter((f) => /^(image|video)\//.test(f.type) || f.type === 'application/pdf')
+    if (!incoming.length) return
+    const rows = incoming.map((file) => ({ key: `${file.name}-${file.size}-${Math.random().toString(36).slice(2, 7)}`, file, opt: file.type.startsWith('image/') ? 'working' : null }))
+    setPicked((cur) => [...cur, ...rows].slice(0, MAX_FILES))
+    rows.forEach(async (r) => {
+      if (r.opt !== 'working') return
+      const res = await optimizeImage(r.file, 'design')
+      setPicked((cur) => cur.map((x) => (x.key === r.key ? { ...x, opt: res } : x)))
+    })
   }
+  const removePicked = (key) => setPicked((cur) => cur.filter((x) => x.key !== key))
+  const working = picked.some((x) => x.opt === 'working')
+  const imgs = picked.filter((x) => x.opt && x.opt !== 'working')
+  const before = imgs.reduce((a, x) => a + x.opt.before, 0), after = imgs.reduce((a, x) => a + (x.opt.changed ? x.opt.after : x.opt.before), 0)
+  const anyChanged = imgs.some((x) => x.opt.changed)
+
   const upload = () => run(async () => {
-    if (!file && !link) throw new Error('Choose a file or paste a link')
-    if (opt === 'working') throw new Error('Still optimising the image — one moment')
-    const send = file && !original && opt?.changed ? opt.file : file
-    if (send && send.size > 50 * 1024 * 1024) throw new Error('File is over 50 MB — share a Drive link instead')
-    const path = send ? await uploadFile('proofs', send, t.id) : null
-    await q(supabase.from('task_proofs').insert({ task_id: t.id, file_path: path, file_name: file?.name || null, file_type: send?.type || null, external_link: link || null, note: note || null }))
-    setFileRaw(null); setOpt(null); setOriginal(false); setLink(''); setNote(''); onChanged()
-  }, 'Proof uploaded — sent for internal review')
+    if (!picked.length && !link) throw new Error('Choose files or paste a link')
+    if (working) throw new Error('Still optimising the images — one moment')
+    const sends = picked.map((x) => ({ x, send: !original && x.opt?.changed ? x.opt.file : x.file }))
+    const big = sends.find((s) => s.send.size > 50 * 1024 * 1024)
+    if (big) throw new Error(`${big.x.file.name} is over 50 MB — share a Drive link for that file instead`)
+    const uploaded = []
+    try {
+      for (let i = 0; i < sends.length; i++) {
+        setProgress(`${i + 1} / ${sends.length}`)
+        const { x, send } = sends[i]
+        uploaded.push({ path: await uploadFile('proofs', send, t.id), name: x.file.name, type: send.type || x.file.type, size: send.size })
+      }
+      const first = uploaded[0]
+      await q(supabase.from('task_proofs').insert({
+        task_id: t.id, file_path: first?.path || null, file_name: first?.name || null, file_type: first?.type || null, files: uploaded,
+        external_link: link || null, note: note || null
+      }))
+    } catch (e) {
+      if (uploaded.length) await supabase.storage.from('proofs').remove(uploaded.map((f) => f.path)).catch(() => {})
+      throw e
+    } finally { setProgress(null) }
+    setPicked([]); setOriginal(false); setLink(''); setNote(''); onChanged()
+  }, picked.length > 1 ? `${picked.length} files uploaded — sent for internal review` : 'Proof uploaded — sent for internal review')
   const remove = async (p) => {
-    if (!(await confirm(`Delete proof v${p.version}?`, { danger: true, okText: 'Delete' }))) return
-    run(async () => { if (p.file_path) await supabase.storage.from('proofs').remove([p.file_path]); await q(supabase.from('task_proofs').delete().eq('id', p.id)); onChanged() }, 'Proof deleted')
+    if (!(await confirm(`Delete proof v${p.version}${p.items.length > 1 ? ` and its ${p.items.length} files` : ''}?`, { danger: true, okText: 'Delete' }))) return
+    run(async () => {
+      const paths = p.items.map((f) => f.path).filter(Boolean)
+      if (paths.length) await supabase.storage.from('proofs').remove(paths)
+      await q(supabase.from('task_proofs').delete().eq('id', p.id)); onChanged()
+    }, 'Proof deleted')
+  }
+  const open = (p, i = 0) => {
+    const f = p.items[i]
+    if (f && f.url && /^(image|video)\//.test(f.type || '')) setZoom({ items: p.items, i })
+    else if (f?.url || p.external_link) window.open(f?.url || p.external_link, '_blank')
   }
 
   return (
@@ -214,49 +255,73 @@ function ProofsSection({ t, proofs, canUpload, canReview, onReview, onChanged })
         <div className="mb">
           <div className={cx('dropzone', over && 'over')} onClick={() => input.current.click()}
             onDragOver={(e) => { e.preventDefault(); setOver(true) }} onDragLeave={() => setOver(false)}
-            onDrop={(e) => { e.preventDefault(); setOver(false); setFile(e.dataTransfer.files[0]) }}>
+            onDrop={(e) => { e.preventDefault(); setOver(false); addFiles(e.dataTransfer.files) }}>
             <UploadCloud size={22} />
-            <div className="strong" style={{ marginTop: 4 }}>{file ? file.name : 'Drop design file here or click to choose'}</div>
-            <div className="tiny">JPG, PNG, PDF, MP4 · up to 50 MB · or paste a Drive/Canva link below</div>
-            <input ref={input} type="file" hidden accept="image/*,video/*,application/pdf" onChange={(e) => { setFile(e.target.files[0]); e.target.value = '' }} />
+            <div className="strong" style={{ marginTop: 4 }}>{picked.length ? `${picked.length} file${picked.length === 1 ? '' : 's'} chosen — click or drop to add more` : 'Drop design files here or click to choose'}</div>
+            <div className="tiny">Select several files at once for multi-design tasks · JPG, PNG, PDF, MP4 · up to 50 MB each · or paste a Drive/Canva link below</div>
+            <input ref={input} type="file" hidden multiple accept="image/*,video/*,application/pdf" onChange={(e) => { addFiles(e.target.files); e.target.value = '' }} />
           </div>
-          {file && opt && (
-            <div className="row between wrap gap-s small mt" style={{ padding: '8px 12px', background: 'var(--green-50)', borderRadius: 10 }}>
-              <span>{opt === 'working' ? 'Optimising image…'
-                : opt.changed ? (original ? <>Uploading the original · {fmtBytes(opt.before)}</> : <>Optimised for storage: <b>{fmtBytes(opt.before)} → {fmtBytes(opt.after)}</b> ({Math.round(100 - (opt.after / opt.before) * 100)}% smaller) · full {opt.width}×{opt.height} px, same visible quality</>)
-                  : <>Image is already compact · {fmtBytes(opt.before)}</>}</span>
-              {opt !== 'working' && opt.changed && <label className="check tiny"><input type="checkbox" checked={original} onChange={(e) => setOriginal(e.target.checked)} />Keep original file (print-ready)</label>}
-            </div>
+          {picked.length > 0 && (
+            <>
+              <div className="pick-grid mt">
+                {picked.map((x, i) => <PickedFile key={x.key} x={x} n={i + 1} onRemove={() => removePicked(x.key)} />)}
+              </div>
+              {imgs.length > 0 && (
+                <div className="row between wrap gap-s small mt" style={{ padding: '8px 12px', background: 'var(--green-50)', borderRadius: 10 }}>
+                  <span>{working ? `Optimising images… (${imgs.length} of ${picked.filter((x) => x.opt).length} ready)`
+                    : anyChanged ? (original ? <>Uploading the original files · {fmtBytes(before)}</> : <>Optimised for storage: <b>{fmtBytes(before)} → {fmtBytes(after)}</b> ({Math.round(100 - (after / before) * 100)}% smaller) · full resolution, same visible quality</>)
+                      : <>Images are already compact · {fmtBytes(before)}</>}</span>
+                  {!working && anyChanged && <label className="check tiny"><input type="checkbox" checked={original} onChange={(e) => setOriginal(e.target.checked)} />Keep original files (print-ready)</label>}
+                </div>
+              )}
+              {t.quantity > 1 && <div className="tiny faint mt">This task asks for {t.quantity} designs · {picked.length} file{picked.length === 1 ? '' : 's'} chosen</div>}
+            </>
           )}
           <div className="form mt">
             <Field label="Or link (Drive / Canva / Figma)"><Input value={link} onChange={(e) => setLink(e.target.value)} placeholder="https://" /></Field>
             <Field label="Note for reviewer"><Input value={note} onChange={(e) => setNote(e.target.value)} placeholder="What changed in this version?" /></Field>
           </div>
-          <div className="row mt" style={{ justifyContent: 'flex-end' }}><Button icon={Send} loading={busy} onClick={upload} disabled={!file && !link}>Submit v{(proofs.data[0]?.version || 0) + 1} for review</Button></div>
+          <div className="row mt" style={{ justifyContent: 'flex-end' }}>
+            <Button icon={Send} loading={busy} onClick={upload} disabled={(!picked.length && !link) || working}>
+              {progress ? `Uploading ${progress}…` : `Submit v${(proofs.data[0]?.version || 0) + 1}${picked.length > 1 ? ` (${picked.length} files)` : ''} for review`}
+            </Button>
+          </div>
         </div>
       )}
       {proofs.loading ? <Loading /> : proofs.data.length === 0 ? <Empty icon={UploadCloud} title="No proofs yet">The designer uploads each version here; reviewers approve or request changes.</Empty> : (
         <div className="proofs">
           {proofs.data.map((p, i) => {
-            const isImg = p.file_type?.startsWith('image/'), isVid = p.file_type?.startsWith('video/')
+            const f0 = p.items[0], isImg = f0?.type?.startsWith('image/'), isVid = f0?.type?.startsWith('video/'), many = p.items.length > 1
             return (
-              <div key={p.id} className="proof" style={i === 0 ? { borderColor: 'var(--green-100)', boxShadow: '0 0 0 2px var(--green-50)' } : undefined}>
-                <div className="thumb" style={isImg && p.url ? { backgroundImage: `url(${p.url})` } : undefined}
-                  onClick={() => (isImg || isVid) && p.url ? setZoom(p) : (p.url || p.external_link) && window.open(p.url || p.external_link, '_blank')}>
+              <div key={p.id} className={cx('proof', many && 'proof-multi')} style={i === 0 ? { borderColor: 'var(--green-100)', boxShadow: '0 0 0 2px var(--green-50)' } : undefined}>
+                <div className="thumb" style={isImg && f0?.url ? { backgroundImage: `url(${f0.url})` } : undefined} onClick={() => open(p, 0)}>
                   <span className="ver">v{p.version}</span>
-                  {!isImg && (isVid ? <Film size={30} /> : p.external_link && !p.file_path ? <Link2 size={30} /> : <FileText size={30} />)}
+                  {many && <span className="count"><Images size={12} />{p.items.length} files</span>}
+                  {!isImg && (isVid ? <Film size={30} /> : p.external_link && !f0 ? <Link2 size={30} /> : <FileText size={30} />)}
                 </div>
+                {many && (
+                  <div className="proof-strip">
+                    {p.items.slice(1, 9).map((f, k) => (
+                      <button key={k} type="button" className="mini" title={f.name || ''} onClick={() => open(p, k + 1)}
+                        style={f.type?.startsWith('image/') && f.url ? { backgroundImage: `url(${f.url})` } : undefined}>
+                        {!f.type?.startsWith('image/') && (f.type?.startsWith('video/') ? <Film size={14} /> : <FileText size={14} />)}
+                        {k === 7 && p.items.length > 9 && <span>+{p.items.length - 9}</span>}
+                      </button>
+                    ))}
+                  </div>
+                )}
                 <div className="info">
                   <div className="row between gap-xs">
                     <ProofStatus p={p} />
                     <span className="tiny faint">{ago(p.created_at)}</span>
                   </div>
-                  <div className="row gap-xs tiny"><Avatar name={member(p.uploaded_by)?.full_name || '?'} size={18} /><span className="faint ellipsis">{p.file_name || (p.external_link ? 'Link' : '')}</span></div>
+                  <div className="row gap-xs tiny"><Avatar name={member(p.uploaded_by)?.full_name || '?'} size={18} /><span className="faint ellipsis">{many ? `${p.items.length} files` : p.file_name || (p.external_link ? 'Link' : '')}</span></div>
                   {p.note && <div className="small">{p.note}</div>}
                   {p.review_note && <div className="small" style={{ color: p.status === 'changes_requested' ? 'var(--orange)' : 'var(--green-d)' }}><b>Review:</b> {p.review_note}</div>}
                   {p.client_note && <div className="small" style={{ color: 'var(--amber)' }}><b>Client:</b> {p.client_note}</div>}
                   <div className="row gap-xs wrap">
-                    {p.url && <a className="btn btn-ghost btn-sm" href={p.url} target="_blank" rel="noreferrer" download={p.file_name}>Open</a>}
+                    {many ? <Button size="sm" variant="ghost" icon={Images} onClick={() => open(p, 0)}>View all</Button>
+                      : p.url && <a className="btn btn-ghost btn-sm" href={p.url} target="_blank" rel="noreferrer" download={p.file_name}>Open</a>}
                     {p.external_link && <a className="btn btn-ghost btn-sm" href={p.external_link} target="_blank" rel="noreferrer">Link <ExternalLink size={11} /></a>}
                     {canReview && p.status === 'pending' && <>
                       <Button size="sm" variant="soft" icon={CheckCircle2} onClick={() => onReview(p, 'approved')}>Approve</Button>
@@ -270,10 +335,30 @@ function ProofsSection({ t, proofs, canUpload, canReview, onReview, onChanged })
           })}
         </div>
       )}
-      {zoom && <div className="lightbox" onClick={() => setZoom(null)}>{zoom.file_type?.startsWith('video/') ? <video src={zoom.url} controls autoPlay onClick={(e) => e.stopPropagation()} /> : <img src={zoom.url} alt="" />}</div>}
+      {zoom && <Gallery items={zoom.items} start={zoom.i} onClose={() => setZoom(null)} />}
     </Card>
   )
 }
+
+function PickedFile({ x, n, onRemove }) {
+  const [src, setSrc] = useState(null)
+  useEffect(() => {
+    if (!x.file.type.startsWith('image/')) return
+    const u = URL.createObjectURL(x.file); setSrc(u)
+    return () => URL.revokeObjectURL(u)
+  }, [x.file])
+  return (
+    <div className="pick" title={x.file.name}>
+      <div className="pick-img" style={src ? { backgroundImage: `url(${src})` } : undefined}>
+        {!src && (x.file.type.startsWith('video/') ? <Film size={18} /> : <FileText size={18} />)}
+        <span className="pick-n">{n}</span>
+        <button type="button" className="pick-x" title="Remove" onClick={(e) => { e.stopPropagation(); onRemove() }}><X size={12} /></button>
+      </div>
+      <div className="tiny ellipsis">{x.opt === 'working' ? 'Optimising…' : x.file.name}</div>
+    </div>
+  )
+}
+
 function ProofStatus({ p }) {
   if (p.client_decision === 'approved') return <Badge tone="green">Client approved</Badge>
   if (p.client_decision === 'changes_requested') return <Badge tone="orange">Client: changes</Badge>

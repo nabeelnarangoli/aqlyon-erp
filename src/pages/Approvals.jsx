@@ -117,6 +117,7 @@ function ProofCard({ t, p, url, onDone }) {
         style={url ? { backgroundImage: `url(${url})` } : undefined}>
         {!url && (p?.external_link ? <span className="small"><ExternalLink size={16} /> Open proof link</span> : <FileText size={28} />)}
         {p && <span className="ver">v{p.version}</span>}
+        {(p?.files?.length || 0) > 1 && <span className="count">{p.files.length} files</span>}
       </div>
       <div className="card-body">
         <div className="row between gap-s"><Link to={`/tasks/${t.id}`} className="strong">{t.title}</Link>{t.due_date && <Due d={t.due_date} />}</div>

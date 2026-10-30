@@ -3,6 +3,7 @@ import { useParams } from 'react-router-dom'
 import { CheckCircle2, MessageSquareWarning, ExternalLink, FileText, Film, Loader2 } from 'lucide-react'
 import { supabase, configured, portalFileUrls, DEMO } from '../lib/supabase'
 import { date } from '../lib/format'
+import Gallery from '../components/Gallery'
 
 // Public, no-login page where a client approves posts and design proofs.
 export default function Portal() {
@@ -17,7 +18,7 @@ export default function Portal() {
     const { data: d, error } = await supabase.rpc('portal_get', { p_token: token })
     if (error || d?.error) { setErr(d?.error || error.message); return }
     setData(d)
-    const ids = (d.proofs || []).filter((p) => p.file_path).map((p) => p.id)
+    const ids = (d.proofs || []).filter((p) => p.file_path || (p.files || []).length).map((p) => p.id)
     if (ids.length) {
       portalFileUrls(token, ids).then(setUrls).catch(() => {})
     }
@@ -90,7 +91,7 @@ function Decide({ kind, id, token, onDone }) {
   }
   if (mode === 'changes') return (
     <div className="col gap-s mt">
-      <textarea className="input" rows={3} autoFocus placeholder="What would you like us to change?" value={note} onChange={(e) => setNote(e.target.value)} />
+      <textarea className="input" rows={3} autoFocus placeholder="What would you like us to change? If there are several designs, mention the number — e.g. “3: make the logo bigger”." value={note} onChange={(e) => setNote(e.target.value)} />
       <div className="row gap-s"><button className="btn btn-ghost" onClick={() => setMode(null)}>Back</button>
         <button className="btn btn-dark" disabled={!note.trim() || busy} onClick={() => send('changes_requested')}>{busy ? 'Sending…' : 'Send feedback'}</button></div>
       {msg && <div className="alert alert-error small">{msg}</div>}
@@ -108,19 +109,37 @@ function Decide({ kind, id, token, onDone }) {
 }
 
 function ProofCard({ p, url, token, onDone, done }) {
-  const isImg = p.file_type?.startsWith('image/'), isVid = p.file_type?.startsWith('video/')
+  // url = every file of this version: [{ url, name, type }]
+  const files = Array.isArray(url) ? url : url ? [{ url, type: p.file_type }] : []
+  const [zoom, setZoom] = useState(null)
+  const one = files.length === 1 ? files[0] : null
+  const isImg = one?.type?.startsWith('image/'), isVid = one?.type?.startsWith('video/')
+  const expected = (p.files || []).length || (p.file_path ? 1 : 0)
   return (
     <div className="card">
-      <div className="card-head"><h3>{p.task_title}</h3><span className="badge tone-slate">{p.task_type} · v{p.version}</span></div>
+      <div className="card-head"><h3>{p.task_title}</h3><span className="badge tone-slate">{p.task_type} · v{p.version}{expected > 1 ? ` · ${expected} designs` : ''}</span></div>
       <div className="card-body">
-        {url && isImg && <img src={url} alt={p.task_title} style={{ width: '100%', maxHeight: 640, objectFit: 'contain', borderRadius: 10, background: '#f0f0ec' }} />}
-        {url && isVid && <video src={url} controls style={{ width: '100%', borderRadius: 10 }} />}
-        {url && !isImg && !isVid && <a className="btn btn-outline" href={url} target="_blank" rel="noreferrer"><FileText size={16} />Open file</a>}
-        {!url && p.file_path && <div className="loading small">{isVid ? <Film size={18} /> : null}Loading preview…</div>}
+        {one && isImg && <img src={one.url} alt={p.task_title} onClick={() => setZoom(0)} style={{ width: '100%', maxHeight: 640, objectFit: 'contain', borderRadius: 10, background: '#f0f0ec', cursor: 'zoom-in' }} />}
+        {one && isVid && <video src={one.url} controls style={{ width: '100%', borderRadius: 10 }} />}
+        {one && !isImg && !isVid && <a className="btn btn-outline" href={one.url} target="_blank" rel="noreferrer"><FileText size={16} />Open file</a>}
+        {files.length > 1 && (
+          <>
+            <p className="small muted" style={{ marginTop: 0 }}>{files.length} designs — tap any one to view full size and swipe through.</p>
+            <div className="portal-files">
+              {files.map((f, i) => (
+                <button key={i} type="button" onClick={() => setZoom(i)} title={f.name || ''} style={f.type?.startsWith('image/') ? { backgroundImage: `url(${f.url})` } : undefined}>
+                  <span>{i + 1}</span>{!f.type?.startsWith('image/') && (f.type?.startsWith('video/') ? <Film size={20} /> : <FileText size={20} />)}
+                </button>
+              ))}
+            </div>
+          </>
+        )}
+        {!files.length && expected > 0 && <div className="loading small">{p.file_type?.startsWith('video/') ? <Film size={18} /> : null}Loading preview…</div>}
         {p.external_link && <a className="btn btn-outline mt" href={p.external_link} target="_blank" rel="noreferrer"><ExternalLink size={15} />View design</a>}
         {p.note && <p className="small muted mt">{p.note}</p>}
         {done ? <div className={`alert mt ${p.client_decision === 'approved' ? 'alert-ok' : 'alert-warn'}`}>{p.client_decision === 'approved' ? 'Approved' : 'Changes requested'}{p.client_note && ` — “${p.client_note}”`}</div>
           : <Decide kind="proof" id={p.id} token={token} onDone={onDone} />}
+        {zoom !== null && <Gallery items={files} start={zoom} onClose={() => setZoom(null)} />}
       </div>
     </div>
   )
