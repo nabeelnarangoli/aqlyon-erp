@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Plus, LayoutGrid, List, Paperclip, RotateCcw, Download } from 'lucide-react'
 import { supabase, q } from '../../lib/supabase'
-import { useData, useLocal, useRealtime } from '../../lib/hooks'
+import { useData, useLocal, useRealtime, isMobileNow } from '../../lib/hooks'
 import { useAuth } from '../../lib/auth'
 import { TASK_STATUSES, TASK_TYPES, PRIORITIES, DESIGNER_STATUSES } from '../../lib/constants'
 import { date, dueLabel, downloadCSV } from '../../lib/format'
@@ -17,7 +17,7 @@ export default function Tasks() {
   const { user, has } = useAuth()
   const nav = useNavigate()
   const { toast } = useToast()
-  const [view, setView] = useLocal('tasks.view', 'board')
+  const [view, setView] = useLocal('tasks.view', isMobileNow() ? 'list' : 'board')
   const [scope, setScope] = useLocal('tasks.scope', has('tasks.manage', 'tasks.review') ? 'all' : 'mine')
   const [client, setClient] = useState('')
   const [designer, setDesigner] = useState('')
@@ -98,21 +98,21 @@ export default function Tasks() {
           })}
         </div>
       ) : rows.length === 0 ? <Empty title="No tasks match these filters" /> : (
-        <div className="card table-wrap"><table className="table">
+        <div className="card table-wrap"><table className="table stack-sm">
           <thead><tr><th>Task</th><th>Client</th><th>Type</th><th>Priority</th><th>Status</th><th>Designer</th><th>Due</th><th className="num">Rev.</th><th className="num">Proofs</th></tr></thead>
           <tbody>{rows.map((t) => {
             const d = dueLabel(t.due_date); const late = !['approved', 'delivered', 'cancelled'].includes(t.status)
             return (
               <tr key={t.id} className="click" onClick={() => nav(`/tasks/${t.id}`)}>
-                <td><div className="cell-title">{t.title}</div><div className="cell-sub">{t.code}</div></td>
-                <td>{t.clients?.name || '—'}</td>
+                <td><div className="cell-title">{t.title}</div><div className="cell-sub">{t.code}<span className="only-sm"> · {t.clients?.name}</span></div></td>
+                <td className="hide-sm">{t.clients?.name || '—'}</td>
                 <td className="nowrap">{t.task_type}{t.quantity > 1 ? ` ×${t.quantity}` : ''}</td>
                 <td><StatusBadge list={PRIORITIES} value={t.priority} /></td>
                 <td><StatusBadge list={TASK_STATUSES} value={t.status} /></td>
                 <td><Member id={t.assignee_id} size={22} /></td>
                 <td>{t.due_date ? (late ? <Badge tone={d.tone}>{date(t.due_date)}</Badge> : date(t.due_date)) : '—'}</td>
-                <td className="num">{t.revision_count}/{t.max_revisions}</td>
-                <td className="num">{t.task_proofs?.[0]?.count || 0}</td>
+                <td className="num hide-sm">{t.revision_count}/{t.max_revisions}</td>
+                <td className="num hide-sm">{t.task_proofs?.[0]?.count || 0}</td>
               </tr>)
           })}</tbody></table></div>
       )}

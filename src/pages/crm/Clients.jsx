@@ -59,20 +59,20 @@ export default function Clients() {
       <ErrorBox error={error} onRetry={reload} />
       {loading ? <Loading /> : rows.length === 0 ? <Empty icon={Building2} title="No clients found">Convert a won lead or add a client directly.</Empty> : (
         <div className="card table-wrap">
-          <table className="table">
+          <table className="table stack-sm">
             <thead><tr><th>Client</th><th>Contact</th><th>Industry</th><th>Status</th><th>Account manager</th><th>Salesman</th>{has('tasks.view', 'tasks.work', 'tasks.manage') && <th className="num">Open tasks</th>}{showMoney() && has('packages.view', 'packages.manage') && <th className="num">Monthly fee</th>}<th>Since</th></tr></thead>
             <tbody>
               {rows.map((c) => (
                 <tr key={c.id} className="click" onClick={() => nav(`/clients/${c.id}`)}>
                   <td><div className="cell-title">{c.name}</div><div className="cell-sub">{c.code}{c.city ? ` · ${c.city}` : ''}{c.customer_type === 'walkin' && <> · <Badge tone="violet">Walk-in</Badge></>}</div></td>
                   <td><div>{c.contact_person || '—'}</div><div className="cell-sub">{c.phone}</div></td>
-                  <td>{c.industry || '—'}</td>
+                  <td className="hide-sm">{c.industry || '—'}</td>
                   <td><StatusBadge list={CLIENT_STATUS} value={c.status} /></td>
                   <td><Member id={c.account_manager_id} size={22} /></td>
-                  <td className="small">{c.salesman_id ? <Member id={c.salesman_id} size={22} /> : c.salesman_name || <span className="faint">—</span>}</td>
-                  {has('tasks.view', 'tasks.work', 'tasks.manage') && <td className="num">{c.openTasks || '—'}</td>}
-                  {showMoney() && has('packages.view', 'packages.manage') && <td className="num">{c.mrr ? money(c.mrr) : '—'}</td>}
-                  <td className="nowrap">{date(c.onboarded_on)}</td>
+                  <td className="small hide-sm">{c.salesman_id ? <Member id={c.salesman_id} size={22} /> : c.salesman_name || <span className="faint">—</span>}</td>
+                  {has('tasks.view', 'tasks.work', 'tasks.manage') && <td className="num" data-label="Open tasks">{c.openTasks || '—'}</td>}
+                  {showMoney() && has('packages.view', 'packages.manage') && <td className="num" data-label="Monthly">{c.mrr ? money(c.mrr) : '—'}</td>}
+                  <td className="nowrap hide-sm">{date(c.onboarded_on)}</td>
                 </tr>
               ))}
             </tbody>

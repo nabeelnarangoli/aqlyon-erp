@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { ChevronLeft, ChevronRight, Plus, Palette, Trash2, Send, LayoutGrid, List, ExternalLink } from 'lucide-react'
 import { supabase, q } from '../../lib/supabase'
-import { useData, useLocal } from '../../lib/hooks'
+import { useData, useLocal, isMobileNow } from '../../lib/hooks'
 import { useAuth } from '../../lib/auth'
 import { POST_STATUSES, POST_TYPES, PLATFORMS, CONTENT_PILLARS, TASK_STATUSES, byId } from '../../lib/constants'
 import { toISO, todayISO, date, addDays, n } from '../../lib/format'
@@ -19,7 +19,7 @@ export default function Calendar() {
   const { toast } = useToast()
   const [params, setParams] = useSearchParams()
   const [client, setClient] = useLocal('cal.client', '')
-  const [view, setView] = useLocal('cal.view', 'month')
+  const [view, setView] = useLocal('cal.view', isMobileNow() ? 'list' : 'month')
   const [cursor, setCursor] = useState(() => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1) })
   const [editing, setEditing] = useState(null)
   const [over, setOver] = useState(null)
@@ -127,16 +127,16 @@ export default function Calendar() {
           })}
         </div>
       ) : monthPosts.length === 0 ? <Empty title="No posts planned this month" /> : (
-        <div className="card table-wrap"><table className="table">
+        <div className="card table-wrap"><table className="table stack-sm">
           <thead><tr><th>Date</th><th>Client</th><th>Post</th><th>Type</th><th>Platforms</th><th>Status</th><th>Design</th><th className="num">Reach</th></tr></thead>
           <tbody>{monthPosts.sort((a, b) => a.publish_date.localeCompare(b.publish_date)).map((p) => (
             <tr key={p.id} className="click" onClick={() => setEditing(p)}>
               <td className="nowrap">{date(p.publish_date, { weekday: 'short', day: 'numeric', month: 'short' })}{p.publish_time && <div className="cell-sub">{p.publish_time.slice(0, 5)}</div>}</td>
               <td>{p.clients?.name}</td><td><div className="cell-title">{p.title}</div><div className="cell-sub">{p.pillar}</div></td>
-              <td>{p.post_type}</td><td className="small">{(p.platforms || []).join(', ')}</td>
+              <td>{p.post_type}</td><td className="small hide-sm">{(p.platforms || []).join(', ')}</td>
               <td><StatusBadge list={POST_STATUSES} value={p.status} /></td>
               <td>{p.design_tasks ? <StatusBadge list={TASK_STATUSES} value={p.design_tasks.status} /> : '—'}</td>
-              <td className="num">{p.reach ? n(p.reach) : '—'}</td>
+              <td className="num hide-sm">{p.reach ? n(p.reach) : '—'}</td>
             </tr>))}</tbody></table></div>
       )}
       <div className="legend mt">{POST_STATUSES.map((s) => <span key={s.id}><i style={{ background: `var(--${s.tone === 'dark' ? 'green-2' : s.tone === 'slate' ? 'slate' : s.tone})` }} />{s.label}</span>)}</div>

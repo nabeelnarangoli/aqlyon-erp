@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { Plus, LayoutGrid, List, Phone, MessageCircle, UserCheck, Flame, Snowflake, Sun, Trash2, FileSignature, Download } from 'lucide-react'
 import { supabase, q } from '../../lib/supabase'
-import { useData, useLocal } from '../../lib/hooks'
+import { useData, useLocal, isMobileNow } from '../../lib/hooks'
 import { useAuth } from '../../lib/auth'
 import { LEAD_STAGES, LEAD_SOURCES, INDUSTRIES, SERVICE_TAGS, byId } from '../../lib/constants'
 import { money, compact, date, dueLabel, waLink, downloadCSV, ago, showMoney } from '../../lib/format'
@@ -15,7 +15,7 @@ import Interactions from '../../components/Interactions'
 const TEMP = { hot: { icon: Flame, tone: 'red' }, warm: { icon: Sun, tone: 'amber' }, cold: { icon: Snowflake, tone: 'blue' } }
 
 export default function Leads() {
-  const [view, setView] = useLocal('leads.view', 'board')
+  const [view, setView] = useLocal('leads.view', isMobileNow() ? 'list' : 'board')
   const [search, setSearch] = useState('')
   const [owner, setOwner] = useState('')
   const [source, setSource] = useState('')
@@ -115,14 +115,14 @@ function LeadTable({ rows, onOpen }) {
   if (!rows.length) return <Empty title="No leads match">Add your first lead or clear filters.</Empty>
   return (
     <div className="card table-wrap">
-      <table className="table">
+      <table className="table stack-sm">
         <thead><tr><th>Lead</th><th>Contact</th><th>Source</th><th>Stage</th>{showMoney() && <th className="num">Value</th>}<th>Owner</th><th>Follow-up</th></tr></thead>
         <tbody>
           {rows.map((l) => (
             <tr key={l.id} className="click" onClick={() => onOpen(l)}>
               <td><div className="cell-title">{l.company || l.name}</div><div className="cell-sub">{l.industry || l.city}</div></td>
               <td><div>{l.name}</div><div className="cell-sub">{l.phone}</div></td>
-              <td>{l.source}</td>
+              <td className="hide-sm">{l.source}</td>
               <td><StatusBadge list={LEAD_STAGES} value={l.stage} /></td>
               {showMoney() && <td className="num">{money(l.estimated_value)}</td>}
               <td><Member id={l.owner_id} size={22} /></td>

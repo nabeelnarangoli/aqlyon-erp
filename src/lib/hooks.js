@@ -52,3 +52,17 @@ export function useDebounced(value, ms = 250) {
   useEffect(() => { const t = setTimeout(() => setV(value), ms); return () => clearTimeout(t) }, [value, ms])
   return v
 }
+
+/** true on phone-sized screens (matches the CSS breakpoint) */
+const MQ = '(max-width: 860px)'
+export function useIsMobile() {
+  const [m, setM] = useState(() => typeof window !== 'undefined' && window.matchMedia?.(MQ).matches)
+  useEffect(() => {
+    const mq = window.matchMedia?.(MQ); if (!mq) return
+    const h = () => setM(mq.matches)
+    mq.addEventListener ? mq.addEventListener('change', h) : mq.addListener(h)
+    return () => (mq.removeEventListener ? mq.removeEventListener('change', h) : mq.removeListener(h))
+  }, [])
+  return m
+}
+export const isMobileNow = () => typeof window !== 'undefined' && !!window.matchMedia?.(MQ).matches

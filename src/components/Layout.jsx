@@ -3,12 +3,12 @@ import { createPortal } from 'react-dom'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import {
   LayoutDashboard, Target, Building2, PhoneCall, Megaphone, Palette, CalendarDays, MessagesSquare,
-  FileText, FileSignature, Wallet, Receipt, BarChart3, Users, Settings, LogOut, Bell, Menu, Clock, CheckCheck, Truck, Store, ShoppingBag, TrendingUp, BadgeCheck, AtSign, X, HelpCircle, Briefcase
+  FileText, FileSignature, Wallet, Receipt, BarChart3, Users, Settings, LogOut, Bell, Menu, Clock, CheckCheck, Truck, Store, ShoppingBag, TrendingUp, BadgeCheck, AtSign, X, HelpCircle, Briefcase, Search, Home
 } from 'lucide-react'
 import { useAuth } from '../lib/auth'
 import { supabase, q, DEMO } from '../lib/supabase'
 import { resetDemo } from '../lib/demo'
-import { useData, useRealtime, useDebounced } from '../lib/hooks'
+import { useData, useRealtime, useDebounced, useIsMobile } from '../lib/hooks'
 import { REPORT_PERMS } from '../lib/permissions'
 import { HelpDrawer } from '../pages/Help'
 import { ago } from '../lib/format'
@@ -113,7 +113,7 @@ export default function Layout() {
       </aside>
       <div className="main">
         <header className="topbar no-print">
-          <IconBtn className="menu-btn" icon={Menu} title="Menu" onClick={() => setOpen(true)} />
+          <img src="/logo-mark.png" alt="" className="topbar-logo only-sm" />
           <GlobalSearch />
           <div className="grow" />
           {DEMO && <DemoBar />}
@@ -123,13 +123,38 @@ export default function Layout() {
         <HelpDrawer open={help} onClose={() => setHelp(false)} path={loc.pathname} />
         <main className="content"><Outlet /></main>
       </div>
+      <TabBar counts={counts.data || {}} onMenu={() => setOpen(true)} />
     </div>
+  )
+}
+
+// phone navigation: the things you check most, one thumb away
+function TabBar({ counts, onMenu }) {
+  const { has } = useAuth()
+  const tasks = has('tasks.view', 'tasks.work', 'tasks.manage', 'tasks.review')
+  const items = [
+    { to: '/', label: 'Home', icon: Home, end: true },
+    { to: '/approvals', label: 'Approvals', icon: BadgeCheck, n: counts.approvals },
+    tasks ? { to: '/tasks', label: 'Tasks', icon: Palette, n: counts.tasks } : { to: '/walkin', label: 'Walk-in', icon: ShoppingBag },
+    has('calendar.view', 'calendar.manage') ? { to: '/calendar', label: 'Calendar', icon: CalendarDays } : { to: '/queries', label: 'Queries', icon: MessagesSquare, n: counts.queries }
+  ]
+  return (
+    <nav className="tabbar no-print">
+      {items.map((i) => (
+        <NavLink key={i.to} to={i.to} end={i.end}>
+          <span className="tb-ico"><i.icon size={21} />{i.n > 0 && <b>{i.n > 99 ? '99+' : i.n}</b>}</span>{i.label}
+        </NavLink>
+      ))}
+      <button type="button" onClick={onMenu}><span className="tb-ico"><Menu size={21} /></span>Menu</button>
+    </nav>
   )
 }
 
 function GlobalSearch() {
   const { has } = useAuth()
   const nav = useNavigate()
+  const mobile = useIsMobile()
+  const [expanded, setExpanded] = useState(false)
   const [term, setTerm] = useState('')
   const [open, setOpen] = useState(false)
   const t = useDebounced(term.trim(), 250)
@@ -156,14 +181,16 @@ function GlobalSearch() {
     const h = (e) => ref.current && !ref.current.contains(e.target) && setOpen(false)
     document.addEventListener('mousedown', h); return () => document.removeEventListener('mousedown', h)
   }, [])
+  if (mobile && !expanded) return <IconBtn icon={Search} title="Search" size={19} onClick={() => setExpanded(true)} />
   return (
-    <div ref={ref} style={{ position: 'relative', flex: 1, maxWidth: 420 }}>
-      <SearchInput value={term} onChange={(v) => { setTerm(v); setOpen(true) }} placeholder="Search clients, tasks, leads, invoices…" />
+    <div ref={ref} className={cx('global-search', mobile && 'expanded')}>
+      <SearchInput value={term} onChange={(v) => { setTerm(v); setOpen(true) }} placeholder={mobile ? 'Search clients, tasks, invoices…' : 'Search clients, tasks, leads, invoices…'} />
+      {mobile && <IconBtn icon={X} title="Close search" onClick={() => { setExpanded(false); setTerm('') }} />}
       {open && t.length >= 2 && (
         <div className="popover" style={{ left: 0, right: 'auto', width: '100%' }}>
           {(res.data || []).length === 0 && <div className="loading small">{res.loading ? 'Searching…' : 'No matches'}</div>}
           {(res.data || []).map((r, i) => (
-            <div key={i} className="notif" onClick={() => { nav(r.to); setOpen(false); setTerm('') }}>
+            <div key={i} className="notif" onClick={() => { nav(r.to); setOpen(false); setTerm(''); setExpanded(false) }}>
               <Badge tone="slate">{r.k}</Badge>
               <div className="grow"><div className="strong ellipsis">{r.label}</div>{r.sub && <div className="tiny faint">{r.sub}</div>}</div>
             </div>
@@ -198,12 +225,12 @@ function Notifications() {
   const popups = (list.data || []).filter((x) => !x.read)
   return (
     <div ref={ref} style={{ position: 'relative' }}>
-      <NotificationPopups items={popups} onOpen={openItem} onRead={markRead} onReadAll={markAll} />
+      <NotificationPopups items={popups} onOpen={openItem} onRead={markRead} onReadAll={markAll} hidden={open} />
       <IconBtn icon={Bell} title="Notifications" size={18} onClick={() => setOpen((v) => !v)} />
       {unread > 0 && <span className="pip" style={{ position: 'absolute', top: 2, right: 2, pointerEvents: 'none', background: 'var(--red)', color: '#fff', borderRadius: 99, fontSize: 10, fontWeight: 700, minWidth: 16, height: 16, display: 'grid', placeItems: 'center', padding: '0 4px' }}>{unread}</span>}
       {open && (
         <div className="popover">
-          <div className="popover-head"><b>Notifications</b>{unread > 0 && <button className="btn btn-ghost btn-sm" onClick={markAll}><CheckCheck size={14} /> Mark all read</button>}</div>
+          <div className="popover-head"><b>Notifications</b><span className="row gap-xs">{unread > 0 && <button className="btn btn-ghost btn-sm" onClick={markAll}><CheckCheck size={14} /> Mark all read</button>}<IconBtn className="only-sm" icon={X} title="Close" onClick={() => setOpen(false)} /></span></div>
           {(list.data || []).length === 0 && <div className="empty small">You're all caught up.</div>}
           {(list.data || []).map((x) => (
             <div key={x.id} className={cx('notif', !x.read && 'unread')} onClick={() => openItem(x)}>
@@ -228,9 +255,27 @@ function KindIcon({ kind }) {
 }
 
 // pop-up cards for unread notifications; each stays until marked read (or opened)
-function NotificationPopups({ items, onOpen, onRead, onReadAll }) {
-  if (!items.length) return null
-  const show = [...items].sort((a, b) => (a.kind === 'approval' ? -1 : 0) - (b.kind === 'approval' ? -1 : 0)).slice(0, 3)
+function NotificationPopups({ items, onOpen, onRead, onReadAll, hidden }) {
+  const mobile = useIsMobile()
+  if (!items.length || hidden) return null
+  const show = [...items].sort((a, b) => (a.kind === 'approval' ? -1 : 0) - (b.kind === 'approval' ? -1 : 0)).slice(0, mobile ? 1 : 3)
+  if (mobile) {
+    // phones: one slim card above the tab bar; the rest wait in the bell
+    const x = show[0]
+    return createPortal(
+      <div className="notif-pops no-print">
+        <div className={cx('notif-pop notif-slim', x.kind && `kind-${x.kind}`)}>
+          <KindIcon kind={x.kind} />
+          <div className="grow" style={{ minWidth: 0 }} onClick={() => x.link && onOpen(x)}>
+            <div className="strong ellipsis">{x.title}</div>
+            {x.body && <div className="tiny muted ellipsis">{x.body}</div>}
+          </div>
+          {x.link && <button className="btn btn-sm btn-primary" onClick={() => onOpen(x)}>{x.kind === 'approval' ? 'Review' : 'Open'}</button>}
+          <button className="icon-btn" title="Mark read" onClick={() => onRead(x)}><X size={16} /></button>
+        </div>
+        {items.length > 1 && <div className="notif-more">{items.length - 1} more unread · <button className="link-btn" onClick={onReadAll}>Mark all read</button></div>}
+      </div>, document.body)
+  }
   return createPortal(
     <div className="notif-pops no-print">
       {show.map((x) => {

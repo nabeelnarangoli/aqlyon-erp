@@ -78,16 +78,16 @@ export default function Invoices() {
         <Select options={[{ id: 'unpaid', label: 'Unpaid (sent + partial)' }, { id: 'overdue', label: 'Overdue' }, ...INVOICE_STATUS]} value={status} onChange={(v) => setStatus(v || '')} placeholder="All statuses" />
       </div>
       {loading ? <Loading /> : rows.length === 0 ? <Empty icon={FileText} title="No invoices">Create one, or generate this month’s retainer invoices from client packages.</Empty> : (
-        <div className="card table-wrap"><table className="table">
+        <div className="card table-wrap"><table className="table stack-sm">
           <thead><tr><th>Invoice</th><th>Client</th><th>Date</th><th>Due</th><th>Status</th><th className="num">Total</th><th className="num">Paid</th><th className="num">Balance</th><th />{isFin && <th />}</tr></thead>
           <tbody>{rows.map((i) => (
             <tr key={i.id} className="click" onClick={() => nav(`/finance/invoices/${i.id}`)}>
-              <td className="cell-title nowrap">{i.number}</td>
-              <td>{i.client_name}</td>
+              <td className="cell-title nowrap">{i.number}<div className="cell-sub only-sm" style={{ fontWeight: 400 }}>{i.client_name}</div></td>
+              <td className="hide-sm">{i.client_name}</td>
               <td className="nowrap">{date(i.issue_date)}{i.period_start && <div className="cell-sub">for {date(i.period_start, { day: 'numeric', month: 'short' })} – {date(i.period_end || i.period_start, { day: 'numeric', month: 'short' })}</div>}</td>
               <td className="nowrap">{i.overdue ? <Badge tone="red">{i.days_overdue}d overdue</Badge> : date(i.due_date)}</td>
               <td><StatusBadge list={INVOICE_STATUS} value={i.status} /></td>
-              <td className="num">{money(i.total)}</td><td className="num">{money(i.amount_paid)}</td><td className="num strong">{money(i.balance)}</td>
+              <td className="num hide-sm">{money(i.total)}</td><td className="num hide-sm">{money(i.amount_paid)}</td><td className="num strong" data-label="Balance">{money(i.balance)}</td>
               <td><DocActions to={`/finance/invoices/${i.id}`} /></td>
               {isFin && <td onClick={(e) => e.stopPropagation()}>{['sent', 'partial', 'draft'].includes(i.status) && <Button size="sm" variant="soft" onClick={() => setPaying(i)}>Record payment</Button>}</td>}
             </tr>))}</tbody>

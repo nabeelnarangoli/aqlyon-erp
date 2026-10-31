@@ -150,9 +150,27 @@ export default function TaskDetail() {
 
       {editing && <TaskModal task={t} onClose={() => setEditing(false)} onSaved={() => { setEditing(false); task.reload() }} />}
       {reviewing && <ReviewModal state={reviewing} task={t} onClose={() => setReviewing(null)} onDone={() => { setReviewing(null); proofs.reload(); task.reload() }} />}
+      {isMgr && !reviewing && latest?.status === 'pending' && t.status === 'internal_review' && (
+        <ReviewBar>
+          <Button variant="outline" icon={XCircle} onClick={() => setReviewing({ proof: latest, decision: 'changes_requested' })}>Request changes</Button>
+          <Button icon={CheckCircle2} onClick={() => setReviewing({ proof: latest, decision: 'approved' })}>Approve v{latest.version}</Button>
+        </ReviewBar>
+      )}
+      {isMgr && !reviewing && t.status === 'client_review' && (
+        <ReviewBar>
+          <Button variant="outline" icon={ThumbsDown} onClick={() => setReviewing({ proof: latest, decision: 'client_changes' })}>Client wants changes</Button>
+          <Button icon={ThumbsUp} loading={busy} onClick={() => setStatus('approved', 'Marked client-approved')}>Client approved</Button>
+        </ReviewBar>
+      )}
       {asking && <AskQuery task={t} onClose={() => setAsking(false)} />}
     </>
   )
+}
+
+// phone-only bar pinned above the tab bar so the decision is one tap away while scrolling the designs
+function ReviewBar({ children }) {
+  useEffect(() => { document.body.classList.add('has-review-bar'); return () => document.body.classList.remove('has-review-bar') }, [])
+  return <div className="review-bar no-print">{children}</div>
 }
 
 const DESIGNER_TRANSITIONS = (t, isMgr) => {

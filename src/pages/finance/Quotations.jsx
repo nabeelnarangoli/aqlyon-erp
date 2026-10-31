@@ -39,7 +39,7 @@ export default function Quotations() {
         <Select options={QUOTE_STATUS} value={status} onChange={(v) => setStatus(v || '')} placeholder="All statuses" />
       </div>
       {loading ? <Loading /> : rows.length === 0 ? <Empty icon={FileSignature} title="No quotations yet" /> : (
-        <div className="card table-wrap"><table className="table">
+        <div className="card table-wrap"><table className="table stack-sm">
           <thead><tr><th>Quote</th><th>For</th><th>Date</th><th>Valid until</th><th>Status</th><th>By</th><th className="num">Total</th><th /></tr></thead>
           <tbody>{rows.map((x) => {
             const exp = x.status === 'sent' && x.valid_until && daysFrom(x.valid_until) < 0
@@ -47,7 +47,7 @@ export default function Quotations() {
               <tr key={x.id} className="click" onClick={() => nav(`/finance/quotations/${x.id}`)}>
                 <td className="cell-title">{x.number}</td>
                 <td>{who(x)}{!x.client_id && x.lead_id && <Badge tone="blue" className="">Lead</Badge>}</td>
-                <td>{date(x.issue_date)}</td>
+                <td className="hide-sm">{date(x.issue_date)}</td>
                 <td>{exp ? <Badge tone="amber">Expired {date(x.valid_until)}</Badge> : date(x.valid_until)}</td>
                 <td><StatusBadge list={QUOTE_STATUS} value={x.status} /></td>
                 <td><Member id={x.created_by} size={22} showName={false} /></td>

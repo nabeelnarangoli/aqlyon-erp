@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { CheckCircle2, XCircle, ExternalLink, Palette, CalendarDays, RotateCcw, MessagesSquare, Hourglass, Send, FileText } from 'lucide-react'
-import { supabase, q, signedUrl } from '../lib/supabase'
+import { supabase, q, signedUrl, proofFiles } from '../lib/supabase'
+import Gallery from '../components/Gallery'
 import { useAuth } from '../lib/auth'
 import { useData, useRealtime } from '../lib/hooks'
 import { date, ago, daysFrom } from '../lib/format'
@@ -24,8 +25,9 @@ export default function Approvals() {
     const proofs = ids.length ? await q(supabase.from('task_proofs').select('*').in('task_id', ids).order('version', { ascending: false })) : []
     const latest = await Promise.all(proofTasks.map(async (t) => {
       const p = proofs.find((x) => x.task_id === t.id)
-      const url = p?.file_path && p.file_type?.startsWith('image/') ? await signedUrl('proofs', p.file_path).catch(() => null) : null
-      return { t, p, url }
+      const items = p ? await Promise.all(proofFiles(p).map(async (f) => ({ ...f, url: await signedUrl('proofs', f.path).catch(() => null) }))) : []
+      const url = items[0]?.type?.startsWith('image/') ? items[0].url : null
+      return { t, p, url, items: items.filter((f) => f.url) }
     }))
     const mineQ = queries.filter((x) => x.to_user === user.id || (x.to_role_id && x.to_role_id === profile.role_id))
     return { proofs: latest, posts, revisions, queries: mineQ, clientTasks, clientPosts }
@@ -98,11 +100,12 @@ function ListRows({ rows }) {
   )
 }
 
-function ProofCard({ t, p, url, onDone }) {
+function ProofCard({ t, p, url, items = [], onDone }) {
   const { user, member } = useAuth()
   const nav = useNavigate()
   const [mode, setMode] = useState(null)
   const [note, setNote] = useState('')
+  const [zoom, setZoom] = useState(null)
   const [busy, run] = useAction()
   const decide = (decision) => run(async () => {
     if (!p) throw new Error('No proof uploaded yet — open the task')
@@ -113,7 +116,7 @@ function ProofCard({ t, p, url, onDone }) {
   }, decision === 'approved' ? 'Approved — ready for the client' : 'Sent back to the designer')
   return (
     <Card className="approval-card">
-      <div className="approval-thumb" onClick={() => (url || p?.external_link) ? window.open(url || p.external_link, '_blank') : nav(`/tasks/${t.id}`)}
+      <div className="approval-thumb" onClick={() => items.length ? setZoom(0) : p?.external_link ? window.open(p.external_link, '_blank') : nav(`/tasks/${t.id}`)}
         style={url ? { backgroundImage: `url(${url})` } : undefined}>
         {!url && (p?.external_link ? <span className="small"><ExternalLink size={16} /> Open proof link</span> : <FileText size={28} />)}
         {p && <span className="ver">v{p.version}</span>}
@@ -140,6 +143,7 @@ function ProofCard({ t, p, url, onDone }) {
           </div>
         )}
       </div>
+      {zoom !== null && <Gallery items={items} start={zoom} onClose={() => setZoom(null)} />}
     </Card>
   )
 }

@@ -94,6 +94,36 @@ Most lists have an \`Export\` or \`CSV\` button. It downloads exactly what you a
 Invoices, quotations, work orders and client social reports have \`Print\` and \`Download PDF\` buttons. The small printer and download icons in the lists do the same without opening the document.`
   },
   {
+    id: 'mobile', cat: 'start', title: 'Using Aqlyon ERP on your phone',
+    summary: 'Add it to your home screen, the bottom tab bar, and approving designs on the go.',
+    body: `
+The ERP works in your phone's browser — no app store needed — and is laid out for one-handed use.
+
+## Add it to your home screen (once)
+- **iPhone (Safari):** open the ERP link → tap the **Share** button → **Add to Home Screen** → **Add**.
+- **Android (Chrome):** open the ERP link → tap **⋮** → **Add to Home screen** (or **Install app**).
+
+It then opens full-screen from its own Aqlyon icon, like an app, and stays signed in if **Remember me** was ticked (see [[sign-in]]).
+
+## Getting around
+- The **tab bar** at the bottom has **Home**, **Approvals**, **Tasks** (or Walk-in), **Calendar** (or Queries) and **Menu**. Red numbers show what's waiting for you. **Menu** opens the full menu.
+- At the top: the 🔍 opens search, **?** opens help for the page, and the 🔔 shows your notifications.
+- Lists (tasks, invoices, clients, leads, quotations, posts) show as easy-to-tap cards. Tasks and the calendar open in **List** view on a phone; you can still switch to Board / Month.
+- Forms and pop-up windows open full-screen with the buttons at the bottom, within reach of your thumb.
+
+## Approving on your phone
+1. Tap the **Review** button on a notification, or open **Approvals**.
+2. Tap the design to see it full-screen. For tasks with **several designs**, swipe through them with ‹ ›.
+3. On a task waiting for your review, an **Approve** / **Request changes** bar stays pinned at the bottom of the screen while you scroll through the designs and the discussion.
+4. Write numbered points when requesting changes — the designer is told straight away.
+
+## Notifications on a phone
+Only **one** pop-up shows at a time, just above the tab bar, with a count of how many more are waiting. Tap **Review** to open it, ✕ to mark it read, or **Mark all read**. Everything is also in the 🔔 list.
+
+## Commenting
+Open the task → **Discussion & activity** → type your message (use **@** to mention someone) → send. See [[notifications]].`
+  },
+  {
     id: 'roles-visibility', cat: 'start', title: 'Roles: who can see and do what',
     summary: 'Why your menu looks different from a colleague’s, and why some amounts show as “—”.',
     body: `
